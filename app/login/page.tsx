@@ -1,0 +1,165 @@
+"use client";
+
+import Image from "next/image";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase/client";
+
+export default function LoginPage() {
+  const router = useRouter();
+
+  const [pin, setPin] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  function pressNumber(num: string) {
+    setErrorMsg("");
+
+    if (pin.length < 6) {
+      setPin((prev) => prev + num);
+    }
+  }
+
+  function clearPin() {
+    setPin("");
+    setErrorMsg("");
+  }
+
+  async function loginStaff() {
+    if (pin.length !== 6) {
+      setErrorMsg("Enter your 6-digit PIN");
+      return;
+    }
+
+    setLoading(true);
+    setErrorMsg("");
+
+    try {
+      const { data, error } = await supabase
+        .from("staff")
+        .select("*")
+        .eq("pin_code", pin)
+        .maybeSingle();
+
+      if (error) {
+        console.error("LOGIN ERROR:", error);
+        setErrorMsg("Could not connect to staff table.");
+        return;
+      }
+
+      if (!data) {
+        setErrorMsg("Invalid PIN");
+        setPin("");
+        return;
+      }
+
+      localStorage.setItem("karamela_staff", JSON.stringify(data));
+
+      if (data.role === "admin") {
+        router.push("/dashboard/admin");
+      } else if (data.role === "manager") {
+        router.push("/dashboard/manager");
+      } else {
+        router.push("/dashboard/staff");
+      }
+    } catch (err) {
+      console.error(err);
+      setErrorMsg("Unexpected error occurred.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#080604] px-4 text-white">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,#9a5a18_0%,transparent_35%),radial-gradient(circle_at_bottom,#3a1d08_0%,transparent_40%)] opacity-60" />
+
+      <div className="relative w-full max-w-md rounded-[2rem] border border-[#c47a2c]/25 bg-white/5 p-8 shadow-2xl backdrop-blur-xl">
+        <div className="flex flex-col items-center text-center">
+          <div className="mb-5 flex h-24 w-24 items-center justify-center rounded-full border border-[#c47a2c]/30 bg-[#130b05] shadow-[0_0_40px_rgba(196,122,44,0.25)]">
+            <Image
+              src="/icons/karamela-icon.jpg"
+              alt="Karamela"
+              width={70}
+              height={70}
+              className="rounded-full"
+              priority
+            />
+          </div>
+
+          <h1 className="text-4xl font-semibold tracking-wide text-[#d08a35]">
+            Karamela
+          </h1>
+
+          <p className="mt-2 text-sm text-zinc-400">
+            Sales • Inventory • Reconciliation
+          </p>
+        </div>
+
+        <div className="mt-8">
+          <div className="mb-5 flex justify-center gap-3">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div
+                key={i}
+                className={`h-4 w-4 rounded-full border border-[#c47a2c]/60 ${
+                  pin.length > i ? "bg-[#d08a35]" : "bg-transparent"
+                }`}
+              />
+            ))}
+          </div>
+
+          {errorMsg && (
+            <p className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-center text-sm text-red-300">
+              {errorMsg}
+            </p>
+          )}
+
+          <div className="grid grid-cols-3 gap-4">
+            {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
+              <button
+                key={num}
+                type="button"
+                disabled={loading}
+                onClick={() => pressNumber(num)}
+                className="h-16 rounded-2xl border border-white/10 bg-white/5 text-2xl font-semibold text-white hover:bg-[#d08a35]/20 active:scale-95"
+              >
+                {num}
+              </button>
+            ))}
+
+            <button
+              type="button"
+              onClick={clearPin}
+              disabled={loading}
+              className="h-16 rounded-2xl border border-white/10 bg-white/5 text-sm font-semibold text-zinc-300 hover:bg-red-500/20"
+            >
+              Clear
+            </button>
+
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => pressNumber("0")}
+              className="h-16 rounded-2xl border border-white/10 bg-white/5 text-2xl font-semibold text-white hover:bg-[#d08a35]/20"
+            >
+              0
+            </button>
+
+            <button
+              type="button"
+              disabled={loading}
+              onClick={loginStaff}
+              className="h-16 rounded-2xl bg-[#d08a35] text-sm font-bold text-black hover:bg-[#e9a34c]"
+            >
+              {loading ? "..." : "Login"}
+            </button>
+          </div>
+        </div>
+
+        <p className="mt-6 text-center text-xs text-zinc-500">
+          Karamela POS v1.0
+        </p>
+      </div>
+    </main>
+  );
+}
