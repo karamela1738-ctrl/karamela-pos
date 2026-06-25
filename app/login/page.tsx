@@ -78,7 +78,7 @@ export default function LoginPage() {
         <div className="flex flex-col items-center text-center">
           <div className="mb-5 flex h-24 w-24 items-center justify-center rounded-full border border-[#c47a2c]/30 bg-[#130b05] shadow-[0_0_40px_rgba(196,122,44,0.25)]">
             <Image
-              src="/icons/karamela-icon.jpg"
+              src="/icons/karamela-icon.jpeg"
               alt="Karamela"
               width={70}
               height={70}
