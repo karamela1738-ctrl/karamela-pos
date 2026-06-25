@@ -1,0 +1,22 @@
+{
+  "name": "Karamela POS",
+  "short_name": "Karamela",
+  "description": "Premium Sales & Inventory POS",
+  "start_url": "/login",
+  "display": "standalone",
+  "background_color": "#080604",
+  "theme_color": "#d08a35",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icons/karamela-icon.jpeg",
+      "sizes": "192x192",
+      "type": "image/jpeg"
+    },
+    {
+      "src": "/icons/karamela-icon.jpeg",
+      "sizes": "512x512",
+      "type": "image/jpeg"
+    }
+  ]
+}
