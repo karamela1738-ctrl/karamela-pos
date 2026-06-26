@@ -1,7 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  DashboardInsightsSection,
+  DashboardListRow,
+  DashboardMetricCard,
+  DashboardPageHeader,
+  DashboardPanel,
+  DashboardPeriodSelect,
+} from "@/components/dashboard/ui";
 import { supabase } from "@/lib/supabase/client";
+import { formatCurrency, formatDate } from "@/lib/utils/format";
+import {
+  isDateWithinPeriod,
+  type DashboardPeriod,
+} from "@/lib/utils/period";
 
 type WasteLog = {
   id: string;
@@ -31,62 +44,43 @@ export default function OwnerWastePage() {
   const [wasteLogs, setWasteLogs] = useState<WasteLog[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
-  const [period, setPeriod] = useState("today");
+  const [period, setPeriod] = useState<DashboardPeriod>("today");
 
   async function loadData() {
-    const { data: wasteData } = await supabase
-      .from("waste_logs")
-      .select("id, product_id, quantity, reason, value_amount, notes, created_at")
-      .order("created_at", { ascending: false });
+    const [wasteResponse, productResponse, salesResponse] = await Promise.all([
+      supabase
+        .from("waste_logs")
+        .select("id, product_id, quantity, reason, value_amount, notes, created_at")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("products")
+        .select("id, product_name, brand, category, selling_price, cost_price"),
+      supabase.from("sales").select("total_amount, created_at"),
+    ]);
 
-    const { data: productData } = await supabase
-      .from("products")
-      .select("id, product_name, brand, category, selling_price, cost_price");
-
-    const { data: salesData } = await supabase
-      .from("sales")
-      .select("total_amount, created_at");
-
-    setWasteLogs(wasteData || []);
-    setProducts(productData || []);
-    setSales(salesData || []);
+    setWasteLogs(wasteResponse.data || []);
+    setProducts(productResponse.data || []);
+    setSales(salesResponse.data || []);
   }
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, []);
 
-  function startDate() {
-    const now = new Date();
+  const productMap = useMemo(
+    () => new Map(products.map((product) => [product.id, product])),
+    [products]
+  );
 
-    if (period === "today") {
-      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    }
+  const filteredWaste = useMemo(
+    () => wasteLogs.filter((log) => isDateWithinPeriod(log.created_at, period)),
+    [wasteLogs, period]
+  );
 
-    if (period === "7days") {
-      const date = new Date();
-      date.setDate(date.getDate() - 7);
-      return date;
-    }
-
-    if (period === "30days") {
-      const date = new Date();
-      date.setDate(date.getDate() - 30);
-      return date;
-    }
-
-    return new Date(0);
-  }
-
-  const filteredWaste = useMemo(() => {
-    const start = startDate();
-    return wasteLogs.filter((log) => new Date(log.created_at) >= start);
-  }, [wasteLogs, period]);
-
-  const filteredSales = useMemo(() => {
-    const start = startDate();
-    return sales.filter((sale) => new Date(sale.created_at) >= start);
-  }, [sales, period]);
+  const filteredSales = useMemo(
+    () => sales.filter((sale) => isDateWithinPeriod(sale.created_at, period)),
+    [sales, period]
+  );
 
   const totalWasteValue = filteredWaste.reduce(
     (sum, log) => sum + Number(log.value_amount || 0),
@@ -106,69 +100,77 @@ export default function OwnerWastePage() {
   const wasteRatio = totalSales > 0 ? (totalWasteValue / totalSales) * 100 : 0;
 
   const reasonBreakdown = useMemo(() => {
-    const map = new Map<string, { reason: string; count: number; value: number }>();
+    const breakdown = new Map<
+      string,
+      { reason: string; count: number; value: number }
+    >();
 
     filteredWaste.forEach((log) => {
       const key = log.reason || "unknown";
-      const current = map.get(key);
+      const current = breakdown.get(key);
 
       if (current) {
         current.count += 1;
         current.value += Number(log.value_amount || 0);
-      } else {
-        map.set(key, {
-          reason: key,
-          count: 1,
-          value: Number(log.value_amount || 0),
-        });
+        return;
       }
+
+      breakdown.set(key, {
+        reason: key,
+        count: 1,
+        value: Number(log.value_amount || 0),
+      });
     });
 
-    return Array.from(map.values()).sort((a, b) => b.value - a.value);
+    return Array.from(breakdown.values()).sort((a, b) => b.value - a.value);
   }, [filteredWaste]);
 
   const productWaste = useMemo(() => {
-    const map = new Map<
+    const breakdown = new Map<
       string,
       { product_id: string; product_name: string; qty: number; value: number }
     >();
 
     filteredWaste.forEach((log) => {
-      const product = products.find((p) => p.id === log.product_id);
-      const name = product?.product_name || "Unknown Product";
-      const key = log.product_id || name;
-
-      const current = map.get(key);
+      const product = log.product_id ? productMap.get(log.product_id) : null;
+      const productName = product?.product_name || "Unknown Product";
+      const key = log.product_id || productName;
+      const current = breakdown.get(key);
 
       if (current) {
         current.qty += Number(log.quantity || 0);
         current.value += Number(log.value_amount || 0);
-      } else {
-        map.set(key, {
-          product_id: key,
-          product_name: name,
-          qty: Number(log.quantity || 0),
-          value: Number(log.value_amount || 0),
-        });
+        return;
       }
+
+      breakdown.set(key, {
+        product_id: key,
+        product_name: productName,
+        qty: Number(log.quantity || 0),
+        value: Number(log.value_amount || 0),
+      });
     });
 
-    return Array.from(map.values()).sort((a, b) => b.value - a.value);
-  }, [filteredWaste, products]);
+    return Array.from(breakdown.values()).sort((a, b) => b.value - a.value);
+  }, [filteredWaste, productMap]);
 
   const categoryWaste = useMemo(() => {
-    const map = new Map<string, number>();
+    const breakdown = new Map<string, number>();
 
     filteredWaste.forEach((log) => {
-      const product = products.find((p) => p.id === log.product_id);
+      const product = log.product_id ? productMap.get(log.product_id) : null;
       const category = product?.category || "Uncategorized";
-      map.set(category, (map.get(category) || 0) + Number(log.value_amount || 0));
+
+      breakdown.set(
+        category,
+        (breakdown.get(category) || 0) + Number(log.value_amount || 0)
+      );
     });
 
-    return Array.from(map.entries())
+    return Array.from(breakdown.entries())
       .map(([category, value]) => ({ category, value }))
       .sort((a, b) => b.value - a.value);
-  }, [filteredWaste, products]);
+  }, [filteredWaste, productMap]);
 
   const theftAndUnknown = filteredWaste.filter(
     (log) => log.reason === "theft" || log.reason === "unknown"
@@ -176,33 +178,33 @@ export default function OwnerWastePage() {
 
   const insights = [
     totalWasteValue > 0
-      ? `🚨 Waste value for this period is KES ${totalWasteValue.toLocaleString()}.`
-      : "✅ No waste recorded for this period.",
+      ? `Waste value for this period is ${formatCurrency(totalWasteValue)}.`
+      : "No waste recorded for this period.",
     wasteRatio > 5
-      ? `🔴 Waste ratio is ${wasteRatio.toFixed(1)}%, which is high.`
+      ? `Waste ratio is ${wasteRatio.toFixed(1)}%, which is high.`
       : wasteRatio > 2
-      ? `🟡 Waste ratio is ${wasteRatio.toFixed(1)}%. Monitor closely.`
-      : `🟢 Waste ratio is ${wasteRatio.toFixed(1)}%, which is healthy.`,
+        ? `Waste ratio is ${wasteRatio.toFixed(1)}%. Monitor closely.`
+        : `Waste ratio is ${wasteRatio.toFixed(1)}%, which is healthy.`,
     productWaste[0]
-      ? `⚠️ ${productWaste[0].product_name} has the highest waste value.`
+      ? `${productWaste[0].product_name} has the highest waste value.`
       : "No product waste pattern detected yet.",
     theftAndUnknown.length > 0
-      ? `🔍 ${theftAndUnknown.length} theft/unknown loss entries need review.`
-      : "✅ No theft or unknown loss entries detected.",
+      ? `${theftAndUnknown.length} theft or unknown loss entries need review.`
+      : "No theft or unknown loss entries detected.",
   ];
 
   function downloadCSV() {
     const rows = [
       ["Product", "Quantity", "Reason", "Value", "Date", "Notes"],
       ...filteredWaste.map((log) => {
-        const product = products.find((p) => p.id === log.product_id);
+        const product = log.product_id ? productMap.get(log.product_id) : null;
 
         return [
           product?.product_name || "Unknown",
           log.quantity,
           log.reason,
           log.value_amount || 0,
-          new Date(log.created_at).toLocaleDateString(),
+          formatDate(log.created_at),
           log.notes || "",
         ];
       }),
@@ -211,8 +213,8 @@ export default function OwnerWastePage() {
     const csv = rows.map((row) => row.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
-
     const link = document.createElement("a");
+
     link.href = url;
     link.download = "karamela-waste-report.csv";
     link.click();
@@ -222,108 +224,100 @@ export default function OwnerWastePage() {
 
   return (
     <main className="min-h-screen bg-[#080604] p-8 text-white">
-      <div className="flex flex-col justify-between gap-5 md:flex-row md:items-end">
-        <div>
-          <p className="text-sm uppercase tracking-[0.3em] text-[#d08a35]">
-            Owner Waste
-          </p>
+      <DashboardPageHeader
+        eyebrow="Owner Waste"
+        title="Waste & Shrinkage Dashboard"
+        description="Track losses, damaged stock, theft, unknown shrinkage and waste impact."
+        actions={
+          <div className="flex gap-3">
+            <DashboardPeriodSelect value={period} onChange={setPeriod} />
 
-          <h1 className="mt-3 text-5xl font-bold">
-            Waste & Shrinkage Dashboard
-          </h1>
-
-          <p className="mt-3 text-zinc-400">
-            Track losses, damaged stock, theft, unknown shrinkage and waste impact.
-          </p>
-        </div>
-
-        <div className="flex gap-3">
-          <select
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3"
-          >
-            <option value="today">Today</option>
-            <option value="7days">Last 7 Days</option>
-            <option value="30days">Last 30 Days</option>
-            <option value="all">All Time</option>
-          </select>
-
-          <button
-            onClick={downloadCSV}
-            className="rounded-2xl bg-[#d08a35] px-5 py-3 font-bold text-black hover:bg-[#e9a34c]"
-          >
-            Export CSV
-          </button>
-        </div>
-      </div>
+            <button
+              type="button"
+              onClick={downloadCSV}
+              className="rounded-2xl bg-[#d08a35] px-5 py-3 font-bold text-black hover:bg-[#e9a34c]"
+            >
+              Export CSV
+            </button>
+          </div>
+        }
+      />
 
       <section className="mt-8 grid gap-5 md:grid-cols-4">
-        <Card title="Waste Value" value={`KES ${totalWasteValue.toLocaleString()}`} />
-        <Card title="Waste Quantity" value={totalWasteQty.toString()} />
-        <Card title="Waste Ratio" value={`${wasteRatio.toFixed(1)}%`} />
-        <Card title="Theft / Unknown" value={theftAndUnknown.length.toString()} />
+        <DashboardMetricCard
+          title="Waste Value"
+          value={formatCurrency(totalWasteValue)}
+        />
+        <DashboardMetricCard
+          title="Waste Quantity"
+          value={totalWasteQty.toString()}
+        />
+        <DashboardMetricCard
+          title="Waste Ratio"
+          value={`${wasteRatio.toFixed(1)}%`}
+        />
+        <DashboardMetricCard
+          title="Theft / Unknown"
+          value={theftAndUnknown.length.toString()}
+        />
       </section>
 
-      <section className="mt-8 rounded-[2rem] border border-[#d08a35]/20 bg-white/5 p-6">
-        <h2 className="text-2xl font-bold text-[#d08a35]">
-          Alerts & Business Insights
-        </h2>
-
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
-          {insights.map((insight, index) => (
-            <div
-              key={index}
-              className="rounded-2xl border border-white/10 bg-black/30 p-5 text-zinc-300"
-            >
-              {insight}
-            </div>
-          ))}
-        </div>
-      </section>
+      <div className="mt-8">
+        <DashboardInsightsSection
+          title="Alerts & Business Insights"
+          insights={insights}
+        />
+      </div>
 
       <section className="mt-8 grid gap-6 md:grid-cols-3">
-        <Panel title="Waste by Reason">
+        <DashboardPanel title="Waste by Reason" contentClassName="mt-5 space-y-2">
           {reasonBreakdown.length === 0 ? (
             <p className="text-zinc-500">No waste data yet.</p>
           ) : (
             reasonBreakdown.map((item) => (
-              <Row
+              <DashboardListRow
                 key={item.reason}
                 left={item.reason}
-                right={`KES ${item.value.toLocaleString()}`}
+                right={formatCurrency(item.value)}
+                leftClassName="capitalize text-zinc-300"
               />
             ))
           )}
-        </Panel>
+        </DashboardPanel>
 
-        <Panel title="Most Wasted Products">
+        <DashboardPanel
+          title="Most Wasted Products"
+          contentClassName="mt-5 space-y-2"
+        >
           {productWaste.length === 0 ? (
             <p className="text-zinc-500">No wasted products yet.</p>
           ) : (
             productWaste.slice(0, 5).map((item) => (
-              <Row
+              <DashboardListRow
                 key={item.product_id}
                 left={item.product_name}
-                right={`KES ${item.value.toLocaleString()}`}
+                right={formatCurrency(item.value)}
               />
             ))
           )}
-        </Panel>
+        </DashboardPanel>
 
-        <Panel title="Waste by Category">
+        <DashboardPanel
+          title="Waste by Category"
+          contentClassName="mt-5 space-y-2"
+        >
           {categoryWaste.length === 0 ? (
             <p className="text-zinc-500">No category waste yet.</p>
           ) : (
             categoryWaste.slice(0, 5).map((item) => (
-              <Row
+              <DashboardListRow
                 key={item.category}
                 left={item.category}
-                right={`KES ${item.value.toLocaleString()}`}
+                right={formatCurrency(item.value)}
               />
             ))
           )}
-        </Panel>
+        </DashboardPanel>
       </section>
 
       <section className="mt-8 overflow-hidden rounded-[2rem] border border-white/10 bg-white/5">
@@ -347,17 +341,15 @@ export default function OwnerWastePage() {
 
           <tbody>
             {filteredWaste.map((log) => {
-              const product = products.find((p) => p.id === log.product_id);
+              const product = log.product_id ? productMap.get(log.product_id) : null;
 
               return (
                 <tr key={log.id} className="border-t border-white/10">
                   <td className="p-4">{product?.product_name || "Unknown"}</td>
                   <td className="p-4">{log.quantity}</td>
                   <td className="p-4 capitalize text-[#d08a35]">{log.reason}</td>
-                  <td className="p-4">KES {log.value_amount || 0}</td>
-                  <td className="p-4 text-zinc-400">
-                    {new Date(log.created_at).toLocaleDateString()}
-                  </td>
+                  <td className="p-4">{formatCurrency(log.value_amount)}</td>
+                  <td className="p-4 text-zinc-400">{formatDate(log.created_at)}</td>
                   <td className="p-4 text-zinc-400">{log.notes || "-"}</td>
                 </tr>
               );
@@ -374,38 +366,5 @@ export default function OwnerWastePage() {
         </table>
       </section>
     </main>
-  );
-}
-
-function Card({ title, value }: { title: string; value: string }) {
-  return (
-    <div className="rounded-3xl border border-[#d08a35]/20 bg-white/5 p-6">
-      <p className="text-sm text-zinc-400">{title}</p>
-      <p className="mt-3 text-3xl font-bold text-[#d08a35]">{value}</p>
-    </div>
-  );
-}
-
-function Panel({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-[2rem] border border-[#d08a35]/20 bg-white/5 p-6">
-      <h2 className="text-2xl font-bold text-[#d08a35]">{title}</h2>
-      <div className="mt-5 space-y-2">{children}</div>
-    </div>
-  );
-}
-
-function Row({ left, right }: { left: string; right: string }) {
-  return (
-    <div className="flex justify-between border-b border-white/10 py-3">
-      <span className="capitalize text-zinc-300">{left}</span>
-      <span className="font-semibold text-[#d08a35]">{right}</span>
-    </div>
   );
 }

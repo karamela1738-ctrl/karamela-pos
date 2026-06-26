@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -35,12 +35,15 @@ export const metadata: Metadata = {
     },
   ],
   manifest: "/manifest.json",
-  themeColor: "#d08a35",
   icons: {
     icon: "/icons/karamela-icon.jpeg",
     shortcut: "/icons/karamela-icon.jpeg",
     apple: "/icons/karamela-icon.jpeg",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#d08a35",
 };
 
 export default function RootLayout({

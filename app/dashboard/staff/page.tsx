@@ -1,34 +1,82 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
+import {
+  DashboardActionCard,
+  DashboardMetricCard,
+} from "@/components/dashboard/ui";
+import { getStoredStaffSession, type StaffSession } from "@/lib/services/auth";
 
-type Staff = {
-  id: string;
-  full_name: string;
-  role: string;
-};
+const STAFF_STATS = [
+  { title: "Today Sales", value: "KES 0", label: "No sales yet" },
+  { title: "Transactions", value: "0", label: "Today" },
+  { title: "Waste Logged", value: "0", label: "Items" },
+  { title: "Shift Status", value: "Open", label: "Active shift" },
+];
+
+const STAFF_ACTIONS = [
+  {
+    title: "Sales POS",
+    description:
+      "Open the tablet sales screen and record customer purchases quickly.",
+    href: "/dashboard/pos",
+    buttonLabel: "Start Selling",
+  },
+  {
+    title: "Waste Log",
+    description:
+      "Record damaged, melted, expired, sampled, or missing stock.",
+    href: "/dashboard/waste",
+    buttonLabel: "Record Waste",
+  },
+  {
+    title: "Closing Stock",
+    description:
+      "Count remaining products at the end of the day and detect variance.",
+    href: "/dashboard/closing-stock",
+    buttonLabel: "Start Count",
+  },
+  {
+    title: "Payment Reconciliation",
+    description:
+      "Compare cash, Mpesa, and card payments against system sales.",
+    href: "/dashboard/reconciliation",
+    buttonLabel: "Reconcile",
+  },
+  {
+    title: "Inventory Check",
+    description: "View current stock levels and low-stock products.",
+    href: "/dashboard/inventory",
+    buttonLabel: "View Stock",
+  },
+  {
+    title: "End Shift",
+    description:
+      "Complete the day after sales, stock count, waste and payments are done.",
+    href: "/dashboard/end-shift",
+    buttonLabel: "End Shift",
+  },
+];
 
 export default function StaffPage() {
-  const [staff, setStaff] = useState<Staff | null>(null);
+  const [staff, setStaff] = useState<StaffSession | null>(null);
   const [time, setTime] = useState("");
 
   useEffect(() => {
-    const savedStaff = localStorage.getItem("karamela_staff");
+    setStaff(getStoredStaffSession());
 
-    if (savedStaff) {
-      setStaff(JSON.parse(savedStaff));
-    }
-
-    const timer = setInterval(() => {
+    function updateTime() {
       setTime(
         new Date().toLocaleTimeString("en-KE", {
           hour: "2-digit",
           minute: "2-digit",
         })
       );
-    }, 1000);
+    }
 
+    updateTime();
+
+    const timer = setInterval(updateTime, 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -67,102 +115,34 @@ export default function StaffPage() {
         </div>
 
         <div className="mt-8 grid gap-6 md:grid-cols-4">
-          <StatCard title="Today Sales" value="KES 0" label="No sales yet" />
-          <StatCard title="Transactions" value="0" label="Today" />
-          <StatCard title="Waste Logged" value="0" label="Items" />
-          <StatCard title="Shift Status" value="Open" label="Active shift" />
+          {STAFF_STATS.map((stat) => (
+            <DashboardMetricCard
+              key={stat.title}
+              title={stat.title}
+              value={stat.value}
+              className="border-white/10 bg-white/5 shadow-xl backdrop-blur"
+              accentClassName="text-white"
+              valueClassName="mt-3 text-3xl font-bold"
+              titleClassName="text-sm text-zinc-400"
+              footer={
+                <p className="mt-1 text-xs text-[#d08a35]">{stat.label}</p>
+              }
+            />
+          ))}
         </div>
 
         <div className="mt-8 grid gap-6 md:grid-cols-3">
-          <ActionCard
-            title="Sales POS"
-            description="Open the tablet sales screen and record customer purchases quickly."
-            href="/dashboard/pos"
-            button="Start Selling"
-          />
-
-          <ActionCard
-            title="Waste Log"
-            description="Record damaged, melted, expired, sampled, or missing stock."
-            href="/dashboard/waste"
-            button="Record Waste"
-          />
-
-          <ActionCard
-            title="Closing Stock"
-            description="Count remaining products at the end of the day and detect variance."
-            href="/dashboard/closing-stock"
-            button="Start Count"
-          />
-
-          <ActionCard
-            title="Payment Reconciliation"
-            description="Compare cash, Mpesa, and card payments against system sales."
-            href="/dashboard/reconciliation"
-            button="Reconcile"
-          />
-
-          <ActionCard
-            title="Inventory Check"
-            description="View current stock levels and low-stock products."
-            href="/dashboard/inventory"
-            button="View Stock"
-          />
-
-          <ActionCard
-            title="End Shift"
-            description="Complete the day after sales, stock count, waste and payments are done."
-            href="/dashboard/end-shift"
-            button="End Shift"
-          />
+          {STAFF_ACTIONS.map((action) => (
+            <DashboardActionCard
+              key={action.title}
+              title={action.title}
+              description={action.description}
+              href={action.href}
+              buttonLabel={action.buttonLabel}
+            />
+          ))}
         </div>
       </section>
     </main>
-  );
-}
-
-function StatCard({
-  title,
-  value,
-  label,
-}: {
-  title: string;
-  value: string;
-  label: string;
-}) {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5 shadow-xl backdrop-blur">
-      <p className="text-sm text-zinc-400">{title}</p>
-      <p className="mt-3 text-3xl font-bold text-white">{value}</p>
-      <p className="mt-1 text-xs text-[#d08a35]">{label}</p>
-    </div>
-  );
-}
-
-function ActionCard({
-  title,
-  description,
-  href,
-  button,
-}: {
-  title: string;
-  description: string;
-  href: string;
-  button: string;
-}) {
-  return (
-    <div className="rounded-[2rem] border border-[#c47a2c]/20 bg-black/30 p-6 shadow-2xl transition hover:-translate-y-1 hover:border-[#d08a35]/60">
-      <h2 className="text-2xl font-bold text-[#d08a35]">{title}</h2>
-      <p className="mt-3 min-h-20 text-sm leading-6 text-zinc-400">
-        {description}
-      </p>
-
-      <Link
-        href={href}
-        className="mt-6 inline-flex w-full justify-center rounded-2xl bg-[#d08a35] px-5 py-3 font-bold text-black hover:bg-[#e9a34c]"
-      >
-        {button}
-      </Link>
-    </div>
   );
 }

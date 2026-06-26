@@ -1,30 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
-type ReceiptItem = {
-  product_name: string;
-  quantity: number;
-  unit_price: number;
-  subtotal: number;
-};
-
-type Receipt = {
-  sale_id: string;
-  total: number;
-  payment_method: string;
-  amount_paid: number;
-  change_amount: number;
-  items: ReceiptItem[];
-  created_at: string;
-};
+import { formatCurrency, formatDateTime } from "@/lib/utils/format";
+import {
+  readStoredReceipt,
+  type ReceiptPayload,
+} from "@/lib/utils/receipt";
 
 export default function ReceiptPage() {
-  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [receipt, setReceipt] = useState<ReceiptPayload | null>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem("karamela_last_receipt");
-    if (saved) setReceipt(JSON.parse(saved));
+    setReceipt(readStoredReceipt());
   }, []);
 
   if (!receipt) {
@@ -40,10 +27,8 @@ export default function ReceiptPage() {
       <div className="mx-auto max-w-sm bg-white p-5 text-black print:shadow-none">
         <div className="text-center">
           <h1 className="text-xl font-bold">KARAMELA POS</h1>
-          <p className="text-xs">Sales • Inventory • Reconciliation</p>
-          <p className="mt-2 text-xs">
-            {new Date(receipt.created_at).toLocaleString()}
-          </p>
+          <p className="text-xs">Sales / Inventory / Reconciliation</p>
+          <p className="mt-2 text-xs">{formatDateTime(receipt.created_at)}</p>
           <p className="text-xs">Receipt: {receipt.sale_id.slice(0, 8)}</p>
         </div>
 
@@ -54,10 +39,10 @@ export default function ReceiptPage() {
             <div key={index}>
               <div className="flex justify-between">
                 <span>{item.product_name}</span>
-                <span>KES {item.subtotal}</span>
+                <span>{formatCurrency(item.subtotal)}</span>
               </div>
               <p className="text-xs">
-                {item.quantity} x KES {item.unit_price}
+                {item.quantity} x {formatCurrency(item.unit_price)}
               </p>
             </div>
           ))}
@@ -68,7 +53,7 @@ export default function ReceiptPage() {
         <div className="space-y-1 text-sm">
           <div className="flex justify-between font-bold">
             <span>Total</span>
-            <span>KES {receipt.total}</span>
+            <span>{formatCurrency(receipt.total)}</span>
           </div>
 
           <div className="flex justify-between">
@@ -78,12 +63,12 @@ export default function ReceiptPage() {
 
           <div className="flex justify-between">
             <span>Paid</span>
-            <span>KES {receipt.amount_paid}</span>
+            <span>{formatCurrency(receipt.amount_paid)}</span>
           </div>
 
           <div className="flex justify-between">
             <span>Change</span>
-            <span>KES {receipt.change_amount}</span>
+            <span>{formatCurrency(receipt.change_amount)}</span>
           </div>
         </div>
 
@@ -96,17 +81,11 @@ export default function ReceiptPage() {
 
       <div className="mx-auto mt-6 flex max-w-sm gap-3 print:hidden">
         <button
+          type="button"
           onClick={() => window.print()}
-          className="flex-1 rounded-xl bg-[#d08a35] py-3 font-bold text-black"
+          className="w-full rounded-xl bg-[#d08a35] py-3 font-bold text-black"
         >
           Print Receipt
-        </button>
-
-        <button
-          onClick={() => history.back()}
-          className="flex-1 rounded-xl bg-white/10 py-3 font-bold text-white"
-        >
-          Back
         </button>
       </div>
     </main>

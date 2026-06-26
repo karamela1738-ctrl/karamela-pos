@@ -1,22 +1,36 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase/client";
+import {
+  getDefaultDashboardPath,
+  getStoredStaffSession,
+  loginWithPin,
+} from "@/lib/services/auth";
+
+const PIN_DOTS = [0, 1, 2, 3, 4, 5];
+const PIN_DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
 export default function LoginPage() {
   const router = useRouter();
-
   const [pin, setPin] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+
+  useEffect(() => {
+    const session = getStoredStaffSession();
+
+    if (session) {
+      router.replace(getDefaultDashboardPath(session.role));
+    }
+  }, [router]);
 
   function pressNumber(num: string) {
     setErrorMsg("");
 
     if (pin.length < 6) {
-      setPin((prev) => prev + num);
+      setPin((current) => current + num);
     }
   }
 
@@ -35,36 +49,20 @@ export default function LoginPage() {
     setErrorMsg("");
 
     try {
-      const { data, error } = await supabase
-        .from("staff")
-        .select("*")
-        .eq("pin_code", pin)
-        .maybeSingle();
+      const session = await loginWithPin(pin);
 
-      if (error) {
-        console.error("LOGIN ERROR:", error);
-        setErrorMsg("Could not connect to staff table.");
-        return;
-      }
-
-      if (!data) {
+      if (!session) {
         setErrorMsg("Invalid PIN");
         setPin("");
         return;
       }
 
-      localStorage.setItem("karamela_staff", JSON.stringify(data));
-
-      if (data.role === "admin") {
-        router.push("/dashboard/admin");
-      } else if (data.role === "manager") {
-        router.push("/dashboard/manager");
-      } else {
-        router.push("/dashboard/staff");
-      }
-    } catch (err) {
-      console.error(err);
-      setErrorMsg("Unexpected error occurred.");
+      router.push(getDefaultDashboardPath(session.role));
+    } catch (error) {
+      console.error(error);
+      setErrorMsg(
+        error instanceof Error ? error.message : "Unexpected error occurred."
+      );
     } finally {
       setLoading(false);
     }
@@ -92,17 +90,17 @@ export default function LoginPage() {
           </h1>
 
           <p className="mt-2 text-sm text-zinc-400">
-            Sales • Inventory • Reconciliation
+            Sales / Inventory / Reconciliation
           </p>
         </div>
 
         <div className="mt-8">
           <div className="mb-5 flex justify-center gap-3">
-            {[0, 1, 2, 3, 4, 5].map((i) => (
+            {PIN_DOTS.map((index) => (
               <div
-                key={i}
+                key={index}
                 className={`h-4 w-4 rounded-full border border-[#c47a2c]/60 ${
-                  pin.length > i ? "bg-[#d08a35]" : "bg-transparent"
+                  pin.length > index ? "bg-[#d08a35]" : "bg-transparent"
                 }`}
               />
             ))}
@@ -115,7 +113,7 @@ export default function LoginPage() {
           )}
 
           <div className="grid grid-cols-3 gap-4">
-            {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
+            {PIN_DIGITS.map((num) => (
               <button
                 key={num}
                 type="button"

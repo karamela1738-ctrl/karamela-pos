@@ -1,8 +1,15 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import {
+  DashboardActionCard,
+  DashboardInsightsSection,
+  DashboardMetricCard,
+} from "@/components/dashboard/ui";
 import { supabase } from "@/lib/supabase/client";
+import { clearStoredStaffSession } from "@/lib/services/auth";
+import { formatCurrency } from "@/lib/utils/format";
 
 type Product = {
   id: string;
@@ -24,6 +31,7 @@ type WasteLog = {
 };
 
 export default function OwnerDashboard() {
+  const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [waste, setWaste] = useState<WasteLog[]>([]);
@@ -73,10 +81,10 @@ export default function OwnerDashboard() {
   const insights = useMemo(
     () => [
       todaySales > 0
-        ? `Today's sales stand at KES ${todaySales.toLocaleString()}.`
+        ? `Today's sales stand at ${formatCurrency(todaySales)}.`
         : "No sales recorded today yet.",
       todayWaste > 0
-        ? `Waste today is KES ${todayWaste.toLocaleString()}. Review shrinkage.`
+        ? `Waste today is ${formatCurrency(todayWaste)}. Review shrinkage.`
         : "No waste recorded today.",
       lowStock > 0
         ? `${lowStock} products are at or below reorder level.`
@@ -84,6 +92,11 @@ export default function OwnerDashboard() {
     ],
     [todaySales, todayWaste, lowStock]
   );
+
+  function logout() {
+    clearStoredStaffSession();
+    router.replace("/login");
+  }
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#070503] text-white">
@@ -106,71 +119,88 @@ export default function OwnerDashboard() {
               </p>
             </div>
 
-            <div className="rounded-3xl border border-white/10 bg-black/30 px-6 py-4">
-              <p className="text-sm text-zinc-400">Today</p>
-              <p className="text-2xl font-bold text-[#d08a35]">
-                {new Date().toLocaleDateString()}
-              </p>
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <div className="rounded-3xl border border-white/10 bg-black/30 px-6 py-4">
+                <p className="text-sm text-zinc-400">Today</p>
+                <p className="text-2xl font-bold text-[#d08a35]">
+                  {new Date().toLocaleDateString()}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={logout}
+                className="rounded-2xl border border-red-500/30 bg-red-500/10 px-6 py-4 font-bold text-red-200 hover:bg-red-500/20"
+              >
+                Log Out
+              </button>
             </div>
           </div>
         </div>
 
         <div className="mt-8 grid gap-5 md:grid-cols-4">
-          <Stat title="Today's Sales" value={`KES ${todaySales.toLocaleString()}`} />
-          <Stat title="Inventory Value" value={`KES ${inventoryValue.toLocaleString()}`} />
-          <Stat title="Waste Today" value={`KES ${todayWaste.toLocaleString()}`} />
-          <Stat title="Low Stock" value={lowStock.toString()} />
+          <DashboardMetricCard
+            title="Today's Sales"
+            value={formatCurrency(todaySales)}
+            accentClassName="text-white font-black"
+          />
+          <DashboardMetricCard
+            title="Inventory Value"
+            value={formatCurrency(inventoryValue)}
+            accentClassName="text-white font-black"
+          />
+          <DashboardMetricCard
+            title="Waste Today"
+            value={formatCurrency(todayWaste)}
+            accentClassName="text-white font-black"
+          />
+          <DashboardMetricCard
+            title="Low Stock"
+            value={lowStock.toString()}
+            accentClassName="text-white font-black"
+          />
         </div>
 
-        <div className="mt-8 rounded-[2rem] border border-[#d08a35]/20 bg-white/5 p-6">
-          <h2 className="text-2xl font-bold text-[#d08a35]">
-            Alerts & Business Insights
-          </h2>
-
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            {insights.map((insight, index) => (
-              <div
-                key={index}
-                className="rounded-2xl border border-white/10 bg-black/30 p-5 text-sm text-zinc-300"
-              >
-                {insight}
-              </div>
-            ))}
-          </div>
+        <div className="mt-8">
+          <DashboardInsightsSection
+            title="Alerts & Business Insights"
+            insights={insights}
+            columnsClassName="md:grid-cols-3"
+          />
         </div>
 
         <div className="mt-8 grid gap-6 md:grid-cols-3">
-          <MenuCard
+          <DashboardActionCard
             title="Sales Reports"
             description="Daily, weekly and monthly sales performance with PDF reports."
             href="/dashboard/reports"
           />
 
-          <MenuCard
+          <DashboardActionCard
             title="Owner Inventory"
             description="Inventory value, low-stock alerts, fast movers and slow movers."
             href="/dashboard/owner-inventory"
           />
 
-          <MenuCard
+          <DashboardActionCard
             title="Waste Analysis"
             description="Monitor shrinkage, theft, damaged stock and loss value."
             href="/dashboard/owner-waste"
           />
 
-          <MenuCard
+          <DashboardActionCard
             title="Payment Control"
             description="Review cash, Mpesa, card payments and payment variance."
             href="/dashboard/owner-reconciliation"
           />
 
-          <MenuCard
+          <DashboardActionCard
             title="Closing Stock"
             description="Review stock counts, missing stock and variance value."
             href="/dashboard/owner-closing-stock"
           />
 
-          <MenuCard
+          <DashboardActionCard
             title="Staff Activity"
             description="Monitor staff sales, waste, closing count and shift activity."
             href="/dashboard/staff-activity"
@@ -178,40 +208,5 @@ export default function OwnerDashboard() {
         </div>
       </section>
     </main>
-  );
-}
-
-function Stat({ title, value }: { title: string; value: string }) {
-  return (
-    <div className="rounded-[2rem] border border-white/10 bg-white/5 p-6 shadow-xl backdrop-blur">
-      <p className="text-sm text-zinc-400">{title}</p>
-      <p className="mt-3 text-3xl font-black text-[#d08a35]">{value}</p>
-    </div>
-  );
-}
-
-function MenuCard({
-  title,
-  description,
-  href,
-}: {
-  title: string;
-  description: string;
-  href: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="group rounded-[2rem] border border-[#d08a35]/20 bg-black/30 p-6 shadow-2xl transition hover:-translate-y-1 hover:border-[#d08a35]/70 hover:bg-[#d08a35]/10"
-    >
-      <h2 className="text-2xl font-black text-[#d08a35]">{title}</h2>
-      <p className="mt-3 min-h-16 text-sm leading-6 text-zinc-400">
-        {description}
-      </p>
-
-      <div className="mt-6 rounded-2xl bg-[#d08a35] px-5 py-3 text-center font-bold text-black group-hover:bg-[#e9a34c]">
-        Open
-      </div>
-    </Link>
   );
 }

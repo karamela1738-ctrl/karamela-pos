@@ -1,15 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  getProducts,
+  type Product,
+} from "@/lib/services/inventory";
+import { getMainStall } from "@/lib/services/stalls";
 import { supabase } from "@/lib/supabase/client";
-
-type Product = {
-  id: string;
-  product_name: string;
-  brand: string | null;
-  selling_price: number | null;
-  stock_qty: number | null;
-};
+import { recordWasteWorkflow } from "@/lib/services/workflows";
+import { formatCurrency } from "@/lib/utils/format";
 
 type WasteLog = {
   id: string;
@@ -21,6 +20,17 @@ type WasteLog = {
   created_at: string;
 };
 
+const WASTE_REASONS = [
+  "damaged",
+  "melted",
+  "expired",
+  "broken",
+  "sample",
+  "theft",
+  "unknown",
+  "other",
+];
+
 export default function WastePage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [logs, setLogs] = useState<WasteLog[]>([]);
@@ -31,17 +41,11 @@ export default function WastePage() {
   const [loading, setLoading] = useState(false);
 
   async function loadProducts() {
-    const { data, error } = await supabase
-      .from("products")
-      .select("id, product_name, brand, selling_price, stock_qty")
-      .order("product_name");
-
-    if (error) {
+    try {
+      setProducts(await getProducts());
+    } catch (error) {
       console.error("Products error:", error);
-      return;
     }
-
-    setProducts(data || []);
   }
 
   async function loadLogs() {
@@ -60,24 +64,21 @@ export default function WastePage() {
   }
 
   useEffect(() => {
-    loadProducts();
-    loadLogs();
+    void loadProducts();
+    void loadLogs();
   }, []);
 
-  const selectedProduct = useMemo(
-    () => products.find((p) => p.id === productId),
-    [products, productId]
+  const productMap = useMemo(
+    () => new Map(products.map((product) => [product.id, product])),
+    [products]
   );
 
+  const selectedProduct = productMap.get(productId);
   const wasteValue =
     Number(quantity || 0) * Number(selectedProduct?.selling_price || 0);
 
-  function productName(id: string) {
-    return products.find((p) => p.id === id)?.product_name || "Unknown";
-  }
-
-  async function recordWaste(e: React.FormEvent) {
-    e.preventDefault();
+  async function recordWaste(event: React.FormEvent) {
+    event.preventDefault();
 
     if (!productId || !quantity) {
       alert("Select product and enter quantity");
@@ -86,60 +87,38 @@ export default function WastePage() {
 
     setLoading(true);
 
-    const { data: stall, error: stallError } = await supabase
-      .from("stalls")
-      .select("id")
-      .limit(1)
-      .single();
+    try {
+      const stall = await getMainStall();
 
-    if (stallError || !stall) {
+      if (!stall) {
+        alert("Could not find stall");
+        return;
+      }
+
+      await recordWasteWorkflow({
+        stallId: stall.id,
+        productId,
+        quantity: Number(quantity),
+        reason,
+        notes,
+      });
+
+      setProductId("");
+      setQuantity("");
+      setReason("damaged");
+      setNotes("");
+
+      await Promise.all([loadProducts(), loadLogs()]);
+      alert("Waste recorded successfully");
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Unable to record waste right now."
+      );
+    } finally {
       setLoading(false);
-      alert("Could not find stall");
-      return;
     }
-
-    const { error: wasteError } = await supabase.from("waste_logs").insert({
-      stall_id: stall.id,
-      product_id: productId,
-      quantity: Number(quantity),
-      reason,
-      value_amount: wasteValue,
-      notes,
-    });
-
-    if (wasteError) {
-      setLoading(false);
-      alert(wasteError.message);
-      return;
-    }
-
-    await supabase.from("inventory_movements").insert({
-      stall_id: stall.id,
-      product_id: productId,
-      movement_type: "waste",
-      quantity: -Number(quantity),
-      notes: `${reason}: ${notes || "No notes"}`,
-    });
-
-    if (selectedProduct) {
-      await supabase
-        .from("products")
-        .update({
-          stock_qty: Number(selectedProduct.stock_qty || 0) - Number(quantity),
-        })
-        .eq("id", productId);
-    }
-
-    setProductId("");
-    setQuantity("");
-    setReason("damaged");
-    setNotes("");
-    setLoading(false);
-
-    await loadProducts();
-    await loadLogs();
-
-    alert("Waste recorded successfully");
   }
 
   return (
@@ -155,13 +134,13 @@ export default function WastePage() {
       >
         <select
           value={productId}
-          onChange={(e) => setProductId(e.target.value)}
+          onChange={(event) => setProductId(event.target.value)}
           className="rounded-2xl border border-white/10 bg-black/40 px-4 py-4"
         >
           <option value="">Select product</option>
           {products.map((product) => (
             <option key={product.id} value={product.id}>
-              {product.product_name} — Stock {product.stock_qty ?? 0}
+              {product.product_name} - Stock {product.stock_qty ?? 0}
             </option>
           ))}
         </select>
@@ -170,34 +149,33 @@ export default function WastePage() {
           type="number"
           placeholder="Quantity wasted"
           value={quantity}
-          onChange={(e) => setQuantity(e.target.value)}
+          onChange={(event) => setQuantity(event.target.value)}
           className="rounded-2xl border border-white/10 bg-black/40 px-4 py-4 outline-none"
         />
 
         <select
           value={reason}
-          onChange={(e) => setReason(e.target.value)}
+          onChange={(event) => setReason(event.target.value)}
           className="rounded-2xl border border-white/10 bg-black/40 px-4 py-4"
         >
-          <option value="damaged">Damaged</option>
-          <option value="melted">Melted</option>
-          <option value="expired">Expired</option>
-          <option value="broken">Broken</option>
-          <option value="sample">Sample</option>
-          <option value="theft">Theft</option>
-          <option value="unknown">Unknown</option>
-          <option value="other">Other</option>
+          {WASTE_REASONS.map((wasteReason) => (
+            <option key={wasteReason} value={wasteReason}>
+              {wasteReason.charAt(0).toUpperCase() + wasteReason.slice(1)}
+            </option>
+          ))}
         </select>
 
         <div className="rounded-2xl border border-[#d08a35]/20 bg-black/40 px-4 py-4">
           Waste Value:{" "}
-          <span className="font-bold text-[#d08a35]">KES {wasteValue}</span>
+          <span className="font-bold text-[#d08a35]">
+            {formatCurrency(wasteValue)}
+          </span>
         </div>
 
         <textarea
           placeholder="Notes"
           value={notes}
-          onChange={(e) => setNotes(e.target.value)}
+          onChange={(event) => setNotes(event.target.value)}
           className="rounded-2xl border border-white/10 bg-black/40 px-4 py-4 outline-none md:col-span-2"
         />
 
@@ -224,10 +202,12 @@ export default function WastePage() {
           <tbody>
             {logs.map((log) => (
               <tr key={log.id} className="border-t border-white/10">
-                <td className="p-4">{productName(log.product_id)}</td>
+                <td className="p-4">
+                  {productMap.get(log.product_id)?.product_name || "Unknown"}
+                </td>
                 <td className="p-4">{log.quantity}</td>
                 <td className="p-4 capitalize text-[#d08a35]">{log.reason}</td>
-                <td className="p-4">KES {log.value_amount || 0}</td>
+                <td className="p-4">{formatCurrency(log.value_amount)}</td>
                 <td className="p-4 text-zinc-400">{log.notes || "-"}</td>
               </tr>
             ))}

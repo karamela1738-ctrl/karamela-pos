@@ -1,9 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase/client";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import {
+  DashboardInsightsSection,
+  DashboardMetricCard,
+  DashboardPageHeader,
+} from "@/components/dashboard/ui";
+import { supabase } from "@/lib/supabase/client";
+import { formatCurrency } from "@/lib/utils/format";
 
 type Sale = {
   id: string;
@@ -18,7 +24,6 @@ type SaleItem = {
   quantity: number;
   unit_price: number;
   subtotal: number;
-  created_at?: string;
 };
 
 type WasteLog = {
@@ -39,33 +44,35 @@ export default function SalesReportsPage() {
     setLoading(true);
 
     const today = new Date().toISOString().slice(0, 10);
+    const startOfDay = `${today}T00:00:00`;
+    const endOfDay = `${today}T23:59:59`;
 
-    const { data: salesData } = await supabase
-      .from("sales")
-      .select("id,total_amount,payment_method,created_at")
-      .gte("created_at", `${today}T00:00:00`)
-      .lte("created_at", `${today}T23:59:59`)
-      .order("created_at", { ascending: false });
+    const [salesResponse, itemsResponse, wasteResponse] = await Promise.all([
+      supabase
+        .from("sales")
+        .select("id,total_amount,payment_method,created_at")
+        .gte("created_at", startOfDay)
+        .lte("created_at", endOfDay)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("sale_items")
+        .select("id,product_name,quantity,unit_price,subtotal")
+        .order("product_name"),
+      supabase
+        .from("waste_logs")
+        .select("id,quantity,reason,value_amount,created_at")
+        .gte("created_at", startOfDay)
+        .lte("created_at", endOfDay),
+    ]);
 
-    const { data: itemData } = await supabase
-      .from("sale_items")
-      .select("id,product_name,quantity,unit_price,subtotal")
-      .order("product_name");
-
-    const { data: wasteData } = await supabase
-      .from("waste_logs")
-      .select("id,quantity,reason,value_amount,created_at")
-      .gte("created_at", `${today}T00:00:00`)
-      .lte("created_at", `${today}T23:59:59`);
-
-    setSales(salesData || []);
-    setItems(itemData || []);
-    setWaste(wasteData || []);
+    setSales(salesResponse.data || []);
+    setItems(itemsResponse.data || []);
+    setWaste(wasteResponse.data || []);
     setLoading(false);
   }
 
   useEffect(() => {
-    loadReports();
+    void loadReports();
   }, []);
 
   const totalSales = sales.reduce(
@@ -74,7 +81,6 @@ export default function SalesReportsPage() {
   );
 
   const transactions = sales.length;
-
   const averageSale = transactions > 0 ? totalSales / transactions : 0;
 
   const wasteValue = waste.reduce(
@@ -82,55 +88,59 @@ export default function SalesReportsPage() {
     0
   );
 
-  const paymentTotals = useMemo(() => {
-    return sales.reduce(
-      (acc, sale) => {
-        const method = sale.payment_method || "cash";
-        acc[method] = (acc[method] || 0) + Number(sale.total_amount || 0);
-        return acc;
-      },
-      {} as Record<string, number>
-    );
-  }, [sales]);
+  const paymentTotals = useMemo(
+    () =>
+      sales.reduce(
+        (totals, sale) => {
+          const method = sale.payment_method || "cash";
+
+          totals[method] = (totals[method] || 0) + Number(sale.total_amount || 0);
+          return totals;
+        },
+        {} as Record<string, number>
+      ),
+    [sales]
+  );
 
   const productPerformance = useMemo(() => {
-    const map = new Map<
+    const performance = new Map<
       string,
       { product_name: string; quantity: number; revenue: number }
     >();
 
     items.forEach((item) => {
-      const existing = map.get(item.product_name);
+      const existing = performance.get(item.product_name);
 
       if (existing) {
         existing.quantity += Number(item.quantity || 0);
         existing.revenue += Number(item.subtotal || 0);
-      } else {
-        map.set(item.product_name, {
-          product_name: item.product_name,
-          quantity: Number(item.quantity || 0),
-          revenue: Number(item.subtotal || 0),
-        });
+        return;
       }
+
+      performance.set(item.product_name, {
+        product_name: item.product_name,
+        quantity: Number(item.quantity || 0),
+        revenue: Number(item.subtotal || 0),
+      });
     });
 
-    return Array.from(map.values()).sort((a, b) => b.quantity - a.quantity);
+    return Array.from(performance.values()).sort((a, b) => b.quantity - a.quantity);
   }, [items]);
 
   const bestSeller = productPerformance[0];
 
   const insights = [
     totalSales > 0
-      ? `Today's sales are KES ${totalSales.toLocaleString()}.`
+      ? `Today's sales are ${formatCurrency(totalSales)}.`
       : "No sales have been recorded today yet.",
     bestSeller
       ? `${bestSeller.product_name} is the fastest moving product with ${bestSeller.quantity} units sold.`
       : "No product movement yet.",
     wasteValue > 0
-      ? `Waste recorded today is KES ${wasteValue.toLocaleString()}. Monitor shrinkage closely.`
+      ? `Waste recorded today is ${formatCurrency(wasteValue)}. Monitor shrinkage closely.`
       : "No waste recorded today. Good stock control so far.",
     averageSale > 0
-      ? `Average transaction value is KES ${averageSale.toFixed(0)}.`
+      ? `Average transaction value is ${formatCurrency(Math.round(averageSale))}.`
       : "Average transaction value will appear after sales are recorded.",
   ];
 
@@ -147,13 +157,13 @@ export default function SalesReportsPage() {
       startY: 36,
       head: [["Metric", "Value"]],
       body: [
-        ["Total Sales", `KES ${totalSales.toLocaleString()}`],
+        ["Total Sales", formatCurrency(totalSales)],
         ["Transactions", transactions.toString()],
-        ["Average Sale", `KES ${averageSale.toFixed(0)}`],
-        ["Waste Value", `KES ${wasteValue.toLocaleString()}`],
-        ["Cash Sales", `KES ${(paymentTotals.cash || 0).toLocaleString()}`],
-        ["Mpesa Sales", `KES ${(paymentTotals.mpesa || 0).toLocaleString()}`],
-        ["Card Sales", `KES ${(paymentTotals.card || 0).toLocaleString()}`],
+        ["Average Sale", formatCurrency(Math.round(averageSale))],
+        ["Waste Value", formatCurrency(wasteValue)],
+        ["Cash Sales", formatCurrency(paymentTotals.cash || 0)],
+        ["Mpesa Sales", formatCurrency(paymentTotals.mpesa || 0)],
+        ["Card Sales", formatCurrency(paymentTotals.card || 0)],
       ],
     });
 
@@ -163,7 +173,7 @@ export default function SalesReportsPage() {
       body: productPerformance.slice(0, 20).map((item) => [
         item.product_name,
         item.quantity,
-        `KES ${item.revenue.toLocaleString()}`,
+        formatCurrency(item.revenue),
       ]),
     });
 
@@ -186,49 +196,67 @@ export default function SalesReportsPage() {
 
   return (
     <main className="min-h-screen bg-[#080604] p-8 text-white">
-      <div className="flex flex-col justify-between gap-5 md:flex-row md:items-center">
-        <div>
-          <h1 className="text-5xl font-bold text-[#d08a35]">Sales Reports</h1>
-          <p className="mt-2 text-zinc-400">
-            Daily sales, product performance, payments and business insights.
-          </p>
-        </div>
-
-        <button
-          onClick={downloadPDF}
-          className="rounded-2xl bg-[#d08a35] px-6 py-4 font-bold text-black hover:bg-[#e9a34c]"
-        >
-          Download PDF Report
-        </button>
-      </div>
+      <DashboardPageHeader
+        title="Sales Reports"
+        description="Daily sales, product performance, payments and business insights."
+        titleClassName="text-5xl font-bold text-[#d08a35]"
+        actions={
+          <button
+            type="button"
+            onClick={downloadPDF}
+            className="rounded-2xl bg-[#d08a35] px-6 py-4 font-bold text-black hover:bg-[#e9a34c]"
+          >
+            Download PDF Report
+          </button>
+        }
+      />
 
       <section className="mt-8 grid gap-5 md:grid-cols-4">
-        <Card title="Today's Sales" value={`KES ${totalSales.toLocaleString()}`} />
-        <Card title="Transactions" value={transactions.toString()} />
-        <Card title="Average Sale" value={`KES ${averageSale.toFixed(0)}`} />
-        <Card title="Waste Value" value={`KES ${wasteValue.toLocaleString()}`} />
+        <DashboardMetricCard
+          title="Today's Sales"
+          value={formatCurrency(totalSales)}
+        />
+        <DashboardMetricCard
+          title="Transactions"
+          value={transactions.toString()}
+        />
+        <DashboardMetricCard
+          title="Average Sale"
+          value={formatCurrency(Math.round(averageSale))}
+        />
+        <DashboardMetricCard
+          title="Waste Value"
+          value={formatCurrency(wasteValue)}
+        />
       </section>
 
       <section className="mt-8 grid gap-6 md:grid-cols-3">
-        <PaymentCard title="Cash" amount={paymentTotals.cash || 0} />
-        <PaymentCard title="Mpesa" amount={paymentTotals.mpesa || 0} />
-        <PaymentCard title="Card" amount={paymentTotals.card || 0} />
+        <DashboardMetricCard
+          title="Cash Sales"
+          value={formatCurrency(paymentTotals.cash || 0)}
+          className="border-white/10 bg-black/30"
+          accentClassName="text-white"
+        />
+        <DashboardMetricCard
+          title="Mpesa Sales"
+          value={formatCurrency(paymentTotals.mpesa || 0)}
+          className="border-white/10 bg-black/30"
+          accentClassName="text-white"
+        />
+        <DashboardMetricCard
+          title="Card Sales"
+          value={formatCurrency(paymentTotals.card || 0)}
+          className="border-white/10 bg-black/30"
+          accentClassName="text-white"
+        />
       </section>
 
-      <section className="mt-8 rounded-[2rem] border border-[#d08a35]/20 bg-white/5 p-6">
-        <h2 className="text-2xl font-bold text-[#d08a35]">Business Insights</h2>
-
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
-          {insights.map((insight, index) => (
-            <div
-              key={index}
-              className="rounded-2xl border border-white/10 bg-black/30 p-5 text-zinc-300"
-            >
-              {insight}
-            </div>
-          ))}
-        </div>
-      </section>
+      <div className="mt-8">
+        <DashboardInsightsSection
+          title="Business Insights"
+          insights={insights}
+        />
+      </div>
 
       <section className="mt-8 overflow-hidden rounded-[2rem] border border-white/10 bg-white/5">
         <div className="border-b border-white/10 p-5">
@@ -252,7 +280,7 @@ export default function SalesReportsPage() {
                 <td className="p-4">{item.product_name}</td>
                 <td className="p-4">{item.quantity}</td>
                 <td className="p-4 text-[#d08a35]">
-                  KES {item.revenue.toLocaleString()}
+                  {formatCurrency(item.revenue)}
                 </td>
               </tr>
             ))}
@@ -268,25 +296,5 @@ export default function SalesReportsPage() {
         </table>
       </section>
     </main>
-  );
-}
-
-function Card({ title, value }: { title: string; value: string }) {
-  return (
-    <div className="rounded-3xl border border-[#d08a35]/20 bg-white/5 p-6">
-      <p className="text-sm text-zinc-400">{title}</p>
-      <p className="mt-3 text-3xl font-bold text-[#d08a35]">{value}</p>
-    </div>
-  );
-}
-
-function PaymentCard({ title, amount }: { title: string; amount: number }) {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-black/30 p-6">
-      <p className="text-sm text-zinc-400">{title} Sales</p>
-      <p className="mt-3 text-3xl font-bold text-white">
-        KES {amount.toLocaleString()}
-      </p>
-    </div>
   );
 }

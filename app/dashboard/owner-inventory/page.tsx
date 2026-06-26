@@ -1,29 +1,26 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase/client";
-
-type Product = {
-  id: string;
-  product_name: string;
-  brand: string | null;
-  category: string | null;
-  stock_qty: number | null;
-  reorder_level: number | null;
-  cost_price: number | null;
-  selling_price: number | null;
-};
-
-type SaleItem = {
-  product_id: string | null;
-  product_name: string;
-  quantity: number;
-  subtotal: number;
-};
+import {
+  DashboardInsightsSection,
+  DashboardListRow,
+  DashboardMetricCard,
+  DashboardPageHeader,
+  DashboardPanel,
+} from "@/components/dashboard/ui";
+import {
+  getProducts,
+  getSaleItems,
+  type Product,
+  type SaleItemSummary,
+} from "@/lib/services/inventory";
+import { getMainStall } from "@/lib/services/stalls";
+import { restockProductWorkflow } from "@/lib/services/workflows";
+import { formatCurrency } from "@/lib/utils/format";
 
 export default function OwnerInventoryPage() {
   const [products, setProducts] = useState<Product[]>([]);
-  const [saleItems, setSaleItems] = useState<SaleItem[]>([]);
+  const [saleItems, setSaleItems] = useState<SaleItemSummary[]>([]);
   const [search, setSearch] = useState("");
 
   const [showAddInventory, setShowAddInventory] = useState(false);
@@ -33,26 +30,25 @@ export default function OwnerInventoryPage() {
   const [saving, setSaving] = useState(false);
 
   async function loadData() {
-    const { data: productData, error: productError } = await supabase
-      .from("products")
-      .select("*")
-      .order("product_name");
+    try {
+      const [productData, salesData] = await Promise.all([
+        getProducts(),
+        getSaleItems(),
+      ]);
 
-    if (productError) {
-      alert(productError.message);
-      return;
+      setProducts(productData);
+      setSaleItems(salesData);
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Unable to load inventory data."
+      );
     }
-
-    const { data: salesData } = await supabase
-      .from("sale_items")
-      .select("product_id, product_name, quantity, subtotal");
-
-    setProducts((productData || []) as Product[]);
-    setSaleItems((salesData || []) as SaleItem[]);
   }
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, []);
 
   const selectedProduct = products.find(
@@ -78,48 +74,47 @@ export default function OwnerInventoryPage() {
 
     setSaving(true);
 
-    const { data: stall } = await supabase
-      .from("stalls")
-      .select("id")
-      .limit(1)
-      .single();
+    try {
+      const stall = await getMainStall();
 
-    const { error: updateError } = await supabase
-      .from("products")
-      .update({
-        stock_qty: newStock,
-      })
-      .eq("id", selectedProductId);
+      if (!stall) {
+        alert("Could not find stall");
+        return;
+      }
 
-    if (updateError) {
+      await restockProductWorkflow({
+        stallId: stall.id,
+        productId: selectedProductId,
+        quantity: receivedQty,
+        notes:
+          restockNotes ||
+          `Stock added by owner. Previous stock ${currentStock}, new stock ${newStock}`,
+      });
+
+      setSelectedProductId("");
+      setQuantityReceived("");
+      setRestockNotes("");
+      setShowAddInventory(false);
+
+      await loadData();
+
+      alert("Inventory added successfully");
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Unable to add inventory right now."
+      );
+    } finally {
       setSaving(false);
-      alert(updateError.message);
-      return;
     }
-
-    await supabase.from("inventory_movements").insert({
-      stall_id: stall?.id,
-      product_id: selectedProductId,
-      movement_type: "issuance",
-      quantity: receivedQty,
-      notes:
-        restockNotes ||
-        `Stock added by owner. Previous stock ${currentStock}, new stock ${newStock}`,
-    });
-
-    setSelectedProductId("");
-    setQuantityReceived("");
-    setRestockNotes("");
-    setShowAddInventory(false);
-    setSaving(false);
-
-    await loadData();
-
-    alert("Inventory added successfully");
   }
 
   const inventoryValue = products.reduce((sum, product) => {
-    return sum + Number(product.stock_qty || 0) * Number(product.cost_price || 0);
+    return (
+      sum +
+      Number(product.stock_qty || 0) * Number(product.cost_price || 0)
+    );
   }, 0);
 
   const lowStock = products.filter((product) => {
@@ -134,28 +129,29 @@ export default function OwnerInventoryPage() {
   );
 
   const productSales = useMemo(() => {
-    const map = new Map<
+    const salesMap = new Map<
       string,
       { product_name: string; quantity: number; revenue: number }
     >();
 
     saleItems.forEach((item) => {
       const key = item.product_id || item.product_name;
-      const existing = map.get(key);
+      const existing = salesMap.get(key);
 
       if (existing) {
         existing.quantity += Number(item.quantity || 0);
         existing.revenue += Number(item.subtotal || 0);
-      } else {
-        map.set(key, {
-          product_name: item.product_name,
-          quantity: Number(item.quantity || 0),
-          revenue: Number(item.subtotal || 0),
-        });
+        return;
       }
+
+      salesMap.set(key, {
+        product_name: item.product_name,
+        quantity: Number(item.quantity || 0),
+        revenue: Number(item.subtotal || 0),
+      });
     });
 
-    return Array.from(map.values()).sort((a, b) => b.quantity - a.quantity);
+    return Array.from(salesMap.values()).sort((a, b) => b.quantity - a.quantity);
   }, [saleItems]);
 
   const fastMovers = productSales.slice(0, 5);
@@ -175,108 +171,91 @@ export default function OwnerInventoryPage() {
 
   const insights = [
     outOfStock.length > 0
-      ? `🚨 ${outOfStock.length} products are out of stock.`
-      : "✅ No products are currently out of stock.",
+      ? `${outOfStock.length} products are out of stock.`
+      : "No products are currently out of stock.",
     lowStock.length > 0
-      ? `⚠️ ${lowStock.length} products are below reorder level.`
-      : "✅ Stock levels look healthy.",
+      ? `${lowStock.length} products are below reorder level.`
+      : "Stock levels look healthy.",
     fastMovers[0]
-      ? `📈 ${fastMovers[0].product_name} is the fastest moving product.`
-      : "📊 Fast movers will appear after sales are recorded.",
+      ? `${fastMovers[0].product_name} is the fastest moving product.`
+      : "Fast movers will appear after sales are recorded.",
     inventoryValue > 0
-      ? `💰 Current inventory value is KES ${inventoryValue.toLocaleString()}.`
-      : "💰 Inventory value will appear after cost prices are added.",
+      ? `Current inventory value is ${formatCurrency(inventoryValue)}.`
+      : "Inventory value will appear after cost prices are added.",
   ];
 
   return (
     <main className="min-h-screen bg-[#080604] p-8 text-white">
-      <div className="flex flex-col justify-between gap-5 md:flex-row md:items-end">
-        <div>
-          <p className="text-sm uppercase tracking-[0.3em] text-[#d08a35]">
-            Owner Inventory
-          </p>
-
-          <h1 className="mt-3 text-5xl font-bold text-white">
-            Inventory Command Center
-          </h1>
-
-          <p className="mt-3 text-zinc-400">
-            Monitor stock value, low-stock alerts, fast movers, slow movers and
-            product performance.
-          </p>
-        </div>
-
-        <button
-          onClick={() => setShowAddInventory(true)}
-          className="rounded-2xl bg-[#d08a35] px-6 py-4 font-bold text-black hover:bg-[#e9a34c]"
-        >
-          + Add Inventory
-        </button>
-      </div>
+      <DashboardPageHeader
+        eyebrow="Owner Inventory"
+        title="Inventory Command Center"
+        description="Monitor stock value, low-stock alerts, fast movers, slow movers and product performance."
+        actions={
+          <button
+            type="button"
+            onClick={() => setShowAddInventory(true)}
+            className="rounded-2xl bg-[#d08a35] px-6 py-4 font-bold text-black hover:bg-[#e9a34c]"
+          >
+            + Add Inventory
+          </button>
+        }
+      />
 
       <section className="mt-8 grid gap-5 md:grid-cols-4">
-        <Card title="Total Products" value={products.length.toString()} />
-        <Card
-          title="Inventory Value"
-          value={`KES ${inventoryValue.toLocaleString()}`}
+        <DashboardMetricCard
+          title="Total Products"
+          value={products.length.toString()}
         />
-        <Card title="Low Stock" value={lowStock.length.toString()} />
-        <Card title="Out of Stock" value={outOfStock.length.toString()} />
+        <DashboardMetricCard
+          title="Inventory Value"
+          value={formatCurrency(inventoryValue)}
+        />
+        <DashboardMetricCard
+          title="Low Stock"
+          value={lowStock.length.toString()}
+        />
+        <DashboardMetricCard
+          title="Out of Stock"
+          value={outOfStock.length.toString()}
+        />
       </section>
 
-      <section className="mt-8 rounded-[2rem] border border-[#d08a35]/20 bg-white/5 p-6">
-        <h2 className="text-2xl font-bold text-[#d08a35]">
-          Alerts & Business Insights
-        </h2>
-
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
-          {insights.map((insight, index) => (
-            <div
-              key={index}
-              className="rounded-2xl border border-white/10 bg-black/30 p-5 text-zinc-300"
-            >
-              {insight}
-            </div>
-          ))}
-        </div>
-      </section>
+      <div className="mt-8">
+        <DashboardInsightsSection
+          title="Alerts & Business Insights"
+          insights={insights}
+        />
+      </div>
 
       <section className="mt-8 grid gap-6 md:grid-cols-2">
-        <Panel title="Fast Movers">
+        <DashboardPanel title="Fast Movers">
           {fastMovers.length === 0 ? (
             <p className="text-zinc-500">No sales recorded yet.</p>
           ) : (
             fastMovers.map((item, index) => (
-              <div
+              <DashboardListRow
                 key={item.product_name}
-                className="flex justify-between border-b border-white/10 py-3"
-              >
-                <span>
-                  {index + 1}. {item.product_name}
-                </span>
-                <span className="text-[#d08a35]">{item.quantity} sold</span>
-              </div>
+                left={`${index + 1}. ${item.product_name}`}
+                right={`${item.quantity} sold`}
+              />
             ))
           )}
-        </Panel>
+        </DashboardPanel>
 
-        <Panel title="Slow Movers">
+        <DashboardPanel title="Slow Movers">
           {slowMovers.length === 0 ? (
             <p className="text-zinc-500">No slow movers detected.</p>
           ) : (
             slowMovers.map((product, index) => (
-              <div
+              <DashboardListRow
                 key={product.id}
-                className="flex justify-between border-b border-white/10 py-3"
-              >
-                <span>
-                  {index + 1}. {product.product_name}
-                </span>
-                <span className="text-zinc-500">No sales</span>
-              </div>
+                left={`${index + 1}. ${product.product_name}`}
+                right="No sales"
+                rightClassName="text-zinc-500"
+              />
             ))
           )}
-        </Panel>
+        </DashboardPanel>
       </section>
 
       <input
@@ -306,7 +285,6 @@ export default function OwnerInventoryPage() {
               const stock = Number(product.stock_qty || 0);
               const reorder = Number(product.reorder_level || 5);
               const value = stock * Number(product.cost_price || 0);
-
               const status =
                 stock <= 0 ? "Out" : stock <= reorder ? "Low" : "Healthy";
 
@@ -326,12 +304,12 @@ export default function OwnerInventoryPage() {
                   <td className="p-4">{stock}</td>
                   <td className="p-4">{reorder}</td>
 
-                  <td className="p-4">KES {product.cost_price || 0}</td>
+                  <td className="p-4">{formatCurrency(product.cost_price)}</td>
                   <td className="p-4 text-[#d08a35]">
-                    KES {product.selling_price || 0}
+                    {formatCurrency(product.selling_price)}
                   </td>
 
-                  <td className="p-4">KES {value.toLocaleString()}</td>
+                  <td className="p-4">{formatCurrency(value)}</td>
 
                   <td className="p-4">
                     <span
@@ -339,8 +317,8 @@ export default function OwnerInventoryPage() {
                         status === "Out"
                           ? "bg-red-500/20 text-red-300"
                           : status === "Low"
-                          ? "bg-yellow-500/20 text-yellow-300"
-                          : "bg-green-500/20 text-green-300"
+                            ? "bg-yellow-500/20 text-yellow-300"
+                            : "bg-green-500/20 text-green-300"
                       }`}
                     >
                       {status}
@@ -383,7 +361,7 @@ export default function OwnerInventoryPage() {
               <option value="">Select product</option>
               {products.map((product) => (
                 <option key={product.id} value={product.id}>
-                  {product.product_name} — Current stock {product.stock_qty ?? 0}
+                  {product.product_name} - Current stock {product.stock_qty ?? 0}
                 </option>
               ))}
             </select>
@@ -444,29 +422,5 @@ export default function OwnerInventoryPage() {
         </div>
       )}
     </main>
-  );
-}
-
-function Card({ title, value }: { title: string; value: string }) {
-  return (
-    <div className="rounded-3xl border border-[#d08a35]/20 bg-white/5 p-6">
-      <p className="text-sm text-zinc-400">{title}</p>
-      <p className="mt-3 text-3xl font-bold text-[#d08a35]">{value}</p>
-    </div>
-  );
-}
-
-function Panel({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-[2rem] border border-[#d08a35]/20 bg-white/5 p-6">
-      <h2 className="text-2xl font-bold text-[#d08a35]">{title}</h2>
-      <div className="mt-5">{children}</div>
-    </div>
   );
 }

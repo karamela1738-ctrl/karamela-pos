@@ -1,15 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase/client";
-
-type Product = {
-  id: string;
-  product_name: string;
-  brand: string | null;
-  stock_qty: number | null;
-  selling_price: number | null;
-};
+import { getProducts, type Product } from "@/lib/services/inventory";
+import { getMainStall } from "@/lib/services/stalls";
+import { submitClosingStockWorkflow } from "@/lib/services/workflows";
 
 type CountItem = {
   product_id: string;
@@ -24,38 +18,38 @@ export default function ClosingStockPage() {
   const [search, setSearch] = useState("");
 
   async function loadProducts() {
-    const { data, error } = await supabase
-      .from("products")
-      .select("id, product_name, brand, stock_qty, selling_price")
-      .order("product_name");
-
-    if (error) {
-      alert(error.message);
-      return;
+    try {
+      setProducts(await getProducts());
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Unable to load products.");
     }
-
-    setProducts(data || []);
   }
 
   useEffect(() => {
-    loadProducts();
+    void loadProducts();
   }, []);
 
-  const filteredProducts = useMemo(() => {
-    return products.filter((product) =>
-      `${product.product_name} ${product.brand || ""}`
-        .toLowerCase()
-        .includes(search.toLowerCase())
-    );
-  }, [products, search]);
+  const filteredProducts = useMemo(
+    () =>
+      products.filter((product) =>
+        `${product.product_name} ${product.brand || ""}`
+          .toLowerCase()
+          .includes(search.toLowerCase())
+      ),
+    [products, search]
+  );
 
-  function updateCount(productId: string, field: "actual_quantity" | "notes", value: string) {
-    setCounts((prev) => ({
-      ...prev,
+  function updateCount(
+    productId: string,
+    field: "actual_quantity" | "notes",
+    value: string
+  ) {
+    setCounts((current) => ({
+      ...current,
       [productId]: {
         product_id: productId,
-        actual_quantity: prev[productId]?.actual_quantity || "",
-        notes: prev[productId]?.notes || "",
+        actual_quantity: current[productId]?.actual_quantity || "",
+        notes: current[productId]?.notes || "",
         [field]: value,
       },
     }));
@@ -73,78 +67,46 @@ export default function ClosingStockPage() {
 
     setLoading(true);
 
-    const { data: stall, error: stallError } = await supabase
-      .from("stalls")
-      .select("id")
-      .limit(1)
-      .single();
+    try {
+      const stall = await getMainStall();
 
-    if (stallError || !stall) {
-      setLoading(false);
-      alert("Could not find stall");
-      return;
-    }
+      if (!stall) {
+        alert("Could not find stall");
+        return;
+      }
 
-    const rows = countEntries.map((item) => {
-      const product = products.find((p) => p.id === item.product_id);
-      const expected = Number(product?.stock_qty || 0);
-      const actual = Number(item.actual_quantity || 0);
-
-      return {
-        stall_id: stall.id,
-        product_id: item.product_id,
-        business_date: new Date().toISOString().slice(0, 10),
-        expected_quantity: expected,
-        actual_quantity: actual,
-        notes: item.notes,
-      };
-    });
-
-    const { error } = await supabase
-      .from("closing_stock_counts")
-      .upsert(rows, {
-        onConflict: "stall_id,product_id,business_date",
+      await submitClosingStockWorkflow({
+        stallId: stall.id,
+        businessDate: new Date().toISOString().slice(0, 10),
+        counts: countEntries.map((item) => ({
+          productId: item.product_id,
+          actualQuantity: Number(item.actual_quantity || 0),
+          notes: item.notes,
+        })),
       });
 
-    if (error) {
+      setCounts({});
+      await loadProducts();
+      alert("Closing stock saved successfully");
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Unable to save closing stock right now."
+      );
+    } finally {
       setLoading(false);
-      alert(error.message);
-      return;
     }
-
-    const movements = rows
-      .filter((row) => row.actual_quantity !== row.expected_quantity)
-      .map((row) => ({
-        stall_id: row.stall_id,
-        product_id: row.product_id,
-        movement_type: "closing_variance",
-        quantity: row.actual_quantity - row.expected_quantity,
-        notes: `Closing variance. Expected ${row.expected_quantity}, actual ${row.actual_quantity}`,
-      }));
-
-    if (movements.length > 0) {
-      await supabase.from("inventory_movements").insert(movements);
-    }
-
-    for (const row of rows) {
-      await supabase
-        .from("products")
-        .update({ stock_qty: row.actual_quantity })
-        .eq("id", row.product_id);
-    }
-
-    setCounts({});
-    setLoading(false);
-    await loadProducts();
-
-    alert("Closing stock saved successfully");
   }
 
   function variance(product: Product) {
-    const actual = counts[product.id]?.actual_quantity;
-    if (actual === "" || actual === undefined) return null;
+    const actualQuantity = counts[product.id]?.actual_quantity;
 
-    return Number(actual) - Number(product.stock_qty || 0);
+    if (actualQuantity === "" || actualQuantity === undefined) {
+      return null;
+    }
+
+    return Number(actualQuantity) - Number(product.stock_qty || 0);
   }
 
   return (
@@ -161,6 +123,7 @@ export default function ClosingStockPage() {
         </div>
 
         <button
+          type="button"
           onClick={submitClosingStock}
           disabled={loading}
           className="rounded-2xl bg-[#d08a35] px-6 py-4 font-bold text-black hover:bg-[#e9a34c] disabled:opacity-50"
@@ -172,7 +135,7 @@ export default function ClosingStockPage() {
       <input
         placeholder="Search product..."
         value={search}
-        onChange={(e) => setSearch(e.target.value)}
+        onChange={(event) => setSearch(event.target.value)}
         className="mt-8 w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-4 outline-none"
       />
 
@@ -190,7 +153,7 @@ export default function ClosingStockPage() {
 
           <tbody>
             {filteredProducts.map((product) => {
-              const v = variance(product);
+              const currentVariance = variance(product);
 
               return (
                 <tr key={product.id} className="border-t border-white/10">
@@ -207,11 +170,11 @@ export default function ClosingStockPage() {
                     <input
                       type="number"
                       value={counts[product.id]?.actual_quantity || ""}
-                      onChange={(e) =>
+                      onChange={(event) =>
                         updateCount(
                           product.id,
                           "actual_quantity",
-                          e.target.value
+                          event.target.value
                         )
                       }
                       className="w-28 rounded-xl border border-white/10 bg-black/40 px-3 py-2 outline-none"
@@ -220,23 +183,23 @@ export default function ClosingStockPage() {
 
                   <td
                     className={`p-4 font-bold ${
-                      v === null
+                      currentVariance === null
                         ? "text-zinc-500"
-                        : v < 0
-                        ? "text-red-300"
-                        : v > 0
-                        ? "text-green-300"
-                        : "text-[#d08a35]"
+                        : currentVariance < 0
+                          ? "text-red-300"
+                          : currentVariance > 0
+                            ? "text-green-300"
+                            : "text-[#d08a35]"
                     }`}
                   >
-                    {v === null ? "-" : v}
+                    {currentVariance === null ? "-" : currentVariance}
                   </td>
 
                   <td className="p-4">
                     <input
                       value={counts[product.id]?.notes || ""}
-                      onChange={(e) =>
-                        updateCount(product.id, "notes", e.target.value)
+                      onChange={(event) =>
+                        updateCount(product.id, "notes", event.target.value)
                       }
                       placeholder="Optional"
                       className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 outline-none"
