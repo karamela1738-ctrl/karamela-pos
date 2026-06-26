@@ -519,9 +519,11 @@ $$;
 
 grant execute on function public.save_payment_reconciliation(uuid, date, numeric, numeric, numeric, text) to anon, authenticated;
 
+drop function if exists public.end_shift(text, text);
+
 create or replace function public.end_shift(
-  p_staff_id text,
-  p_action text default 'shift_closed'
+  p_action text,
+  p_staff_id uuid
 )
 returns jsonb
 language plpgsql
@@ -530,8 +532,9 @@ set search_path = public
 as $$
 declare
   v_created_at timestamptz := now();
+  v_action text := coalesce(nullif(trim(p_action), ''), 'shift_closed');
 begin
-  if coalesce(nullif(trim(p_staff_id), ''), '') = '' then
+  if p_staff_id is null then
     raise exception 'Staff not found';
   end if;
 
@@ -542,16 +545,18 @@ begin
   )
   values (
     p_staff_id,
-    coalesce(nullif(trim(p_action), ''), 'shift_closed'),
+    v_action,
     v_created_at
   );
 
   return jsonb_build_object(
     'staff_id', p_staff_id,
-    'action', coalesce(nullif(trim(p_action), ''), 'shift_closed'),
+    'action', v_action,
     'created_at', v_created_at
   );
 end;
 $$;
 
-grant execute on function public.end_shift(text, text) to anon, authenticated;
+grant execute on function public.end_shift(text, uuid) to anon, authenticated;
+
+notify pgrst, 'reload schema';

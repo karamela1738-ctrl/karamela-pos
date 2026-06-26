@@ -3,6 +3,56 @@ import type { ReceiptItem, ReceiptPayload } from "@/lib/utils/receipt";
 
 type WorkflowResult = Record<string, unknown>;
 
+type CompleteSaleRpcParams = {
+  p_stall_id: string;
+  p_payment_method: string;
+  p_amount_paid: number;
+  p_staff_name: string | null;
+  p_items: Array<{
+    product_id: string;
+    quantity: number;
+  }>;
+};
+
+type RestockProductRpcParams = {
+  p_stall_id: string;
+  p_product_id: string;
+  p_quantity: number;
+  p_notes: string | null;
+};
+
+type RecordWasteRpcParams = {
+  p_stall_id: string;
+  p_product_id: string;
+  p_quantity: number;
+  p_reason: string;
+  p_notes: string | null;
+};
+
+type SubmitClosingStockRpcParams = {
+  p_stall_id: string;
+  p_business_date: string;
+  p_counts: Array<{
+    product_id: string;
+    actual_quantity: number;
+    notes: string | null;
+  }>;
+};
+
+type SavePaymentReconciliationRpcParams = {
+  p_stall_id: string;
+  p_business_date: string;
+  p_cash_counted: number;
+  p_mpesa_confirmed: number;
+  p_card_confirmed: number;
+  p_notes: string | null;
+};
+
+type EndShiftRpcParams = {
+  p_action: string;
+  p_staff_id: string;
+};
+
 export type SaleWorkflowItemInput = {
   productId: string;
   quantity: number;
@@ -120,17 +170,19 @@ export async function completeSaleWorkflow({
   staffName?: string;
   items: SaleWorkflowItemInput[];
 }) {
+  const params: CompleteSaleRpcParams = {
+    p_stall_id: stallId,
+    p_payment_method: paymentMethod,
+    p_amount_paid: amountPaid,
+    p_staff_name: staffName || null,
+    p_items: items.map((item) => ({
+      product_id: item.productId,
+      quantity: item.quantity,
+    })),
+  };
+
   const result = requireWorkflowResult(
-    await callWorkflow<unknown>("complete_sale", {
-      p_stall_id: stallId,
-      p_payment_method: paymentMethod,
-      p_amount_paid: amountPaid,
-      p_staff_name: staffName || null,
-      p_items: items.map((item) => ({
-        product_id: item.productId,
-        quantity: item.quantity,
-      })),
-    }),
+    await callWorkflow<unknown>("complete_sale", params),
     "complete_sale"
   );
 
@@ -151,13 +203,15 @@ export async function restockProductWorkflow({
   quantity,
   notes,
 }: RestockWorkflowInput) {
+  const params: RestockProductRpcParams = {
+    p_stall_id: stallId,
+    p_product_id: productId,
+    p_quantity: quantity,
+    p_notes: notes || null,
+  };
+
   const result = requireWorkflowResult(
-    await callWorkflow<unknown>("restock_product", {
-      p_stall_id: stallId,
-      p_product_id: productId,
-      p_quantity: quantity,
-      p_notes: notes || null,
-    }),
+    await callWorkflow<unknown>("restock_product", params),
     "restock_product"
   );
 
@@ -174,14 +228,16 @@ export async function recordWasteWorkflow({
   reason,
   notes,
 }: WasteWorkflowInput) {
+  const params: RecordWasteRpcParams = {
+    p_stall_id: stallId,
+    p_product_id: productId,
+    p_quantity: quantity,
+    p_reason: reason,
+    p_notes: notes || null,
+  };
+
   const result = requireWorkflowResult(
-    await callWorkflow<unknown>("record_waste", {
-      p_stall_id: stallId,
-      p_product_id: productId,
-      p_quantity: quantity,
-      p_reason: reason,
-      p_notes: notes || null,
-    }),
+    await callWorkflow<unknown>("record_waste", params),
     "record_waste"
   );
 
@@ -197,16 +253,18 @@ export async function submitClosingStockWorkflow({
   businessDate,
   counts,
 }: ClosingStockWorkflowInput) {
+  const params: SubmitClosingStockRpcParams = {
+    p_stall_id: stallId,
+    p_business_date: businessDate,
+    p_counts: counts.map((item) => ({
+      product_id: item.productId,
+      actual_quantity: item.actualQuantity,
+      notes: item.notes || null,
+    })),
+  };
+
   const result = requireWorkflowResult(
-    await callWorkflow<unknown>("submit_closing_stock", {
-      p_stall_id: stallId,
-      p_business_date: businessDate,
-      p_counts: counts.map((item) => ({
-        product_id: item.productId,
-        actual_quantity: item.actualQuantity,
-        notes: item.notes || null,
-      })),
-    }),
+    await callWorkflow<unknown>("submit_closing_stock", params),
     "submit_closing_stock"
   );
 
@@ -224,15 +282,17 @@ export async function savePaymentReconciliationWorkflow({
   cardConfirmed,
   notes,
 }: ReconciliationWorkflowInput) {
+  const params: SavePaymentReconciliationRpcParams = {
+    p_stall_id: stallId,
+    p_business_date: businessDate,
+    p_cash_counted: cashCounted,
+    p_mpesa_confirmed: mpesaConfirmed,
+    p_card_confirmed: cardConfirmed,
+    p_notes: notes || null,
+  };
+
   const result = requireWorkflowResult(
-    await callWorkflow<unknown>("save_payment_reconciliation", {
-      p_stall_id: stallId,
-      p_business_date: businessDate,
-      p_cash_counted: cashCounted,
-      p_mpesa_confirmed: mpesaConfirmed,
-      p_card_confirmed: cardConfirmed,
-      p_notes: notes || null,
-    }),
+    await callWorkflow<unknown>("save_payment_reconciliation", params),
     "save_payment_reconciliation"
   );
 
@@ -245,11 +305,13 @@ export async function savePaymentReconciliationWorkflow({
 }
 
 export async function endShiftWorkflow(staffId: string) {
+  const params: EndShiftRpcParams = {
+    p_action: "shift_closed",
+    p_staff_id: staffId,
+  };
+
   return requireWorkflowResult(
-    await callWorkflow<unknown>("end_shift", {
-      p_staff_id: staffId,
-      p_action: "shift_closed",
-    }),
+    await callWorkflow<unknown>("end_shift", params),
     "end_shift"
   );
 }
