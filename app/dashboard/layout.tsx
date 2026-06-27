@@ -6,6 +6,7 @@ import {
   canAccessDashboardPath,
   getDefaultDashboardPath,
   getStoredStaffSession,
+  validateStoredStaffSession,
 } from "@/lib/services/auth";
 
 export default function DashboardLayout({
@@ -20,19 +21,27 @@ export default function DashboardLayout({
   useEffect(() => {
     setAuthorized(false);
 
-    const session = getStoredStaffSession();
+    async function checkAccess() {
+      try {
+        const session = await validateStoredStaffSession();
 
-    if (!session) {
-      router.replace("/login");
-      return;
+        if (!session) {
+          router.replace("/login");
+          return;
+        }
+
+        if (!canAccessDashboardPath(session.role, pathname)) {
+          router.replace(getDefaultDashboardPath(session.role));
+          return;
+        }
+
+        setAuthorized(true);
+      } catch {
+        router.replace("/login");
+      }
     }
 
-    if (!canAccessDashboardPath(session.role, pathname)) {
-      router.replace(getDefaultDashboardPath(session.role));
-      return;
-    }
-
-    setAuthorized(true);
+    void checkAccess();
   }, [pathname, router]);
 
   if (!authorized) {

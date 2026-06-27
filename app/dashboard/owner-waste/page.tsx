@@ -9,81 +9,77 @@ import {
   DashboardPanel,
   DashboardPeriodSelect,
 } from "@/components/dashboard/ui";
-import { supabase } from "@/lib/supabase/client";
-import { formatCurrency, formatDate } from "@/lib/utils/format";
+import { logDashboardQuery } from "@/lib/services/dashboard";
 import {
-  isDateWithinPeriod,
-  type DashboardPeriod,
-} from "@/lib/utils/period";
-
-type WasteLog = {
-  id: string;
-  product_id: string | null;
-  quantity: number;
-  reason: string;
-  value_amount: number | null;
-  notes: string | null;
-  created_at: string;
-};
-
-type Product = {
-  id: string;
-  product_name: string;
-  brand: string | null;
-  category: string | null;
-  selling_price: number | null;
-  cost_price: number | null;
-};
-
-type Sale = {
-  total_amount: number;
-  created_at: string;
-};
+  getOwnerSalesRows,
+  getOwnerWasteRows,
+  type OwnerSaleRow,
+  type OwnerWasteRow,
+} from "@/lib/services/operations";
+import { subscribeDashboardRefresh } from "@/lib/utils/dashboard-refresh";
+import { formatCurrency, formatDate } from "@/lib/utils/format";
+import { type DashboardPeriod } from "@/lib/utils/period";
 
 export default function OwnerWastePage() {
-  const [wasteLogs, setWasteLogs] = useState<WasteLog[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [sales, setSales] = useState<Sale[]>([]);
+  const [wasteLogs, setWasteLogs] = useState<OwnerWasteRow[]>([]);
+  const [sales, setSales] = useState<OwnerSaleRow[]>([]);
   const [period, setPeriod] = useState<DashboardPeriod>("today");
+  const [error, setError] = useState<string | null>(null);
 
   async function loadData() {
-    const [wasteResponse, productResponse, salesResponse] = await Promise.all([
-      supabase
-        .from("waste_logs")
-        .select("id, product_id, quantity, reason, value_amount, notes, created_at")
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("products")
-        .select("id, product_name, brand, category, selling_price, cost_price"),
-      supabase.from("sales").select("total_amount, created_at"),
-    ]);
+    try {
+      const [hydratedWaste, salesRows] = await Promise.all([
+        getOwnerWasteRows(period),
+        getOwnerSalesRows(period),
+      ]);
 
-    setWasteLogs(wasteResponse.data || []);
-    setProducts(productResponse.data || []);
-    setSales(salesResponse.data || []);
+      setWasteLogs(hydratedWaste);
+      setSales(salesRows);
+      setError(null);
+
+      logDashboardQuery("owner-waste", {
+        period,
+        waste_rows: hydratedWaste.length,
+        sales_rows: salesRows.length,
+      });
+
+      if (process.env.NODE_ENV !== "production") {
+        console.log("[owner-waste]", {
+          period,
+          wasteRows: hydratedWaste.length,
+          salesRows: salesRows.length,
+          wasteValue: hydratedWaste.reduce(
+            (sum, log) => sum + Number(log.effective_value || 0),
+            0
+          ),
+        });
+      }
+    } catch (loadError) {
+      console.error(loadError);
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Unable to load waste analysis."
+      );
+      setWasteLogs([]);
+      setSales([]);
+    }
   }
 
   useEffect(() => {
     void loadData();
-  }, []);
+  }, [period]);
 
-  const productMap = useMemo(
-    () => new Map(products.map((product) => [product.id, product])),
-    [products]
-  );
-
-  const filteredWaste = useMemo(
-    () => wasteLogs.filter((log) => isDateWithinPeriod(log.created_at, period)),
-    [wasteLogs, period]
-  );
-
-  const filteredSales = useMemo(
-    () => sales.filter((sale) => isDateWithinPeriod(sale.created_at, period)),
-    [sales, period]
-  );
+  useEffect(() => {
+    return subscribeDashboardRefresh(() => {
+      void loadData();
+    });
+  }, [period]);
+  const filteredWaste = wasteLogs;
+  const filteredSales = sales;
 
   const totalWasteValue = filteredWaste.reduce(
-    (sum, log) => sum + Number(log.value_amount || 0),
+    (sum, log) => sum + Number(log.effective_value || 0),
     0
   );
 
@@ -111,14 +107,14 @@ export default function OwnerWastePage() {
 
       if (current) {
         current.count += 1;
-        current.value += Number(log.value_amount || 0);
+        current.value += Number(log.effective_value || 0);
         return;
       }
 
       breakdown.set(key, {
         reason: key,
         count: 1,
-        value: Number(log.value_amount || 0),
+        value: Number(log.effective_value || 0),
       });
     });
 
@@ -132,14 +128,13 @@ export default function OwnerWastePage() {
     >();
 
     filteredWaste.forEach((log) => {
-      const product = log.product_id ? productMap.get(log.product_id) : null;
-      const productName = product?.product_name || "Unknown Product";
+      const productName = log.product_name || "Unknown Product";
       const key = log.product_id || productName;
       const current = breakdown.get(key);
 
       if (current) {
         current.qty += Number(log.quantity || 0);
-        current.value += Number(log.value_amount || 0);
+        current.value += Number(log.effective_value || 0);
         return;
       }
 
@@ -147,30 +142,29 @@ export default function OwnerWastePage() {
         product_id: key,
         product_name: productName,
         qty: Number(log.quantity || 0),
-        value: Number(log.value_amount || 0),
+        value: Number(log.effective_value || 0),
       });
     });
 
     return Array.from(breakdown.values()).sort((a, b) => b.value - a.value);
-  }, [filteredWaste, productMap]);
+  }, [filteredWaste]);
 
   const categoryWaste = useMemo(() => {
     const breakdown = new Map<string, number>();
 
     filteredWaste.forEach((log) => {
-      const product = log.product_id ? productMap.get(log.product_id) : null;
-      const category = product?.category || "Uncategorized";
+      const category = log.category || "Uncategorized";
 
       breakdown.set(
         category,
-        (breakdown.get(category) || 0) + Number(log.value_amount || 0)
+        (breakdown.get(category) || 0) + Number(log.effective_value || 0)
       );
     });
 
     return Array.from(breakdown.entries())
       .map(([category, value]) => ({ category, value }))
       .sort((a, b) => b.value - a.value);
-  }, [filteredWaste, productMap]);
+  }, [filteredWaste]);
 
   const theftAndUnknown = filteredWaste.filter(
     (log) => log.reason === "theft" || log.reason === "unknown"
@@ -197,13 +191,11 @@ export default function OwnerWastePage() {
     const rows = [
       ["Product", "Quantity", "Reason", "Value", "Date", "Notes"],
       ...filteredWaste.map((log) => {
-        const product = log.product_id ? productMap.get(log.product_id) : null;
-
         return [
-          product?.product_name || "Unknown",
+          log.product_name || "Unknown",
           log.quantity,
           log.reason,
-          log.value_amount || 0,
+          log.effective_value || 0,
           formatDate(log.created_at),
           log.notes || "",
         ];
@@ -224,6 +216,12 @@ export default function OwnerWastePage() {
 
   return (
     <main className="min-h-screen bg-[#080604] p-8 text-white">
+      {error && (
+        <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-100">
+          {error}
+        </div>
+      )}
+
       <DashboardPageHeader
         eyebrow="Owner Waste"
         title="Waste & Shrinkage Dashboard"
@@ -341,14 +339,12 @@ export default function OwnerWastePage() {
 
           <tbody>
             {filteredWaste.map((log) => {
-              const product = log.product_id ? productMap.get(log.product_id) : null;
-
               return (
-                <tr key={log.id} className="border-t border-white/10">
-                  <td className="p-4">{product?.product_name || "Unknown"}</td>
+                <tr key={log.waste_id} className="border-t border-white/10">
+                  <td className="p-4">{log.product_name || "Unknown"}</td>
                   <td className="p-4">{log.quantity}</td>
                   <td className="p-4 capitalize text-[#d08a35]">{log.reason}</td>
-                  <td className="p-4">{formatCurrency(log.value_amount)}</td>
+                  <td className="p-4">{formatCurrency(log.effective_value)}</td>
                   <td className="p-4 text-zinc-400">{formatDate(log.created_at)}</td>
                   <td className="p-4 text-zinc-400">{log.notes || "-"}</td>
                 </tr>

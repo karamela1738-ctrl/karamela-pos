@@ -7,75 +7,88 @@ import {
   DashboardPageHeader,
   DashboardPeriodSelect,
 } from "@/components/dashboard/ui";
-import { supabase } from "@/lib/supabase/client";
-import { formatCurrency } from "@/lib/utils/format";
+import { logDashboardQuery } from "@/lib/services/dashboard";
 import {
-  isDateWithinPeriod,
-  type DashboardPeriod,
-} from "@/lib/utils/period";
-
-type Sale = {
-  id: string;
-  total_amount: number;
-  payment_method: string;
-  created_at: string;
-};
-
-type Reconciliation = {
-  id: string;
-  business_date: string;
-  cash_expected: number;
-  cash_counted: number;
-  mpesa_expected: number;
-  mpesa_confirmed: number;
-  card_expected: number;
-  card_confirmed: number;
-  variance: number;
-  notes: string | null;
-  created_at: string;
-};
+  getOwnerReconciliationRows,
+  getOwnerSalesRows,
+  type OwnerReconciliationRow,
+  type OwnerSaleRow,
+} from "@/lib/services/operations";
+import { subscribeDashboardRefresh } from "@/lib/utils/dashboard-refresh";
+import { formatCurrency } from "@/lib/utils/format";
+import { type DashboardPeriod } from "@/lib/utils/period";
 
 export default function OwnerReconciliationPage() {
-  const [sales, setSales] = useState<Sale[]>([]);
-  const [reconciliations, setReconciliations] = useState<Reconciliation[]>([]);
+  const [sales, setSales] = useState<OwnerSaleRow[]>([]);
+  const [reconciliations, setReconciliations] = useState<OwnerReconciliationRow[]>([]);
   const [period, setPeriod] = useState<DashboardPeriod>("today");
+  const [error, setError] = useState<string | null>(null);
 
   async function loadData() {
-    const [salesResponse, reconciliationResponse] = await Promise.all([
-      supabase
-        .from("sales")
-        .select("id,total_amount,payment_method,created_at")
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("payment_reconciliations")
-        .select("*")
-        .order("business_date", { ascending: false }),
-    ]);
+    try {
+      const [salesRows, reconciliationRows] = await Promise.all([
+        getOwnerSalesRows(period),
+        getOwnerReconciliationRows(period),
+      ]);
 
-    setSales(salesResponse.data || []);
-    setReconciliations((reconciliationResponse.data || []) as Reconciliation[]);
+      setSales(salesRows);
+      setReconciliations(reconciliationRows);
+      setError(null);
+
+      logDashboardQuery("owner-reconciliation", {
+        period,
+        sales_rows: salesRows.length,
+        reconciliation_rows: reconciliationRows.length,
+      });
+
+      if (process.env.NODE_ENV !== "production") {
+        console.log("[owner-reconciliation]", {
+          period,
+          salesRows: salesRows.length,
+          reconciliationRows: reconciliationRows.length,
+        });
+      }
+    } catch (error) {
+      console.error(error);
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load reconciliation analysis."
+      );
+      setSales([]);
+      setReconciliations([]);
+    }
   }
 
   useEffect(() => {
     void loadData();
-  }, []);
+  }, [period]);
 
-  const filteredSales = useMemo(
-    () => sales.filter((sale) => isDateWithinPeriod(sale.created_at, period)),
-    [sales, period]
-  );
+  useEffect(() => {
+    return subscribeDashboardRefresh(() => {
+      void loadData();
+    });
+  }, [period]);
 
-  const filteredReconciliations = useMemo(
-    () =>
-      reconciliations.filter((reconciliation) =>
-        isDateWithinPeriod(reconciliation.business_date, period)
-      ),
-    [reconciliations, period]
-  );
+  const filteredSales = sales;
+  const filteredReconciliations = reconciliations;
 
   const expectedByPayment = useMemo(
-    () =>
-      filteredSales.reduce(
+    () => {
+      if (filteredReconciliations.length > 0) {
+        return filteredReconciliations.reduce(
+          (totals, sale) => {
+            totals.cash += Number(sale.cash_expected || 0);
+            totals.mpesa += Number(sale.mpesa_expected || 0);
+            totals.card += Number(sale.card_expected || 0);
+
+            return totals;
+          },
+          { cash: 0, mpesa: 0, card: 0 }
+        );
+      }
+
+      return filteredSales.reduce(
         (totals, sale) => {
           const method = sale.payment_method || "cash";
 
@@ -86,8 +99,9 @@ export default function OwnerReconciliationPage() {
           return totals;
         },
         { cash: 0, mpesa: 0, card: 0 }
-      ),
-    [filteredSales]
+      );
+    },
+    [filteredReconciliations, filteredSales]
   );
 
   const totalExpected =
@@ -102,7 +116,13 @@ export default function OwnerReconciliationPage() {
     );
   }, 0);
 
-  const totalVariance = totalCounted - totalExpected;
+  const totalVariance =
+    filteredReconciliations.length > 0
+      ? filteredReconciliations.reduce(
+          (sum, item) => sum + Number(item.variance || 0),
+          0
+        )
+      : 0;
   const unreconciled =
     filteredSales.length > 0 && filteredReconciliations.length === 0;
 
@@ -177,6 +197,12 @@ export default function OwnerReconciliationPage() {
 
   return (
     <main className="min-h-screen bg-[#080604] p-8 text-white">
+      {error && (
+        <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-100">
+          {error}
+        </div>
+      )}
+
       <DashboardPageHeader
         eyebrow="Owner Reconciliation"
         title="Payment Control Dashboard"
@@ -264,7 +290,7 @@ export default function OwnerReconciliationPage() {
 
           <tbody>
             {filteredReconciliations.map((item) => (
-              <tr key={item.id} className="border-t border-white/10">
+              <tr key={item.reconciliation_id} className="border-t border-white/10">
                 <td className="p-4">{item.business_date}</td>
                 <td className="p-4">
                   {formatCurrency(item.cash_counted)} /{" "}

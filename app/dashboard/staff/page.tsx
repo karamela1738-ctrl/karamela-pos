@@ -5,14 +5,12 @@ import {
   DashboardActionCard,
   DashboardMetricCard,
 } from "@/components/dashboard/ui";
-import { getStoredStaffSession, type StaffSession } from "@/lib/services/auth";
-
-const STAFF_STATS = [
-  { title: "Today Sales", value: "KES 0", label: "No sales yet" },
-  { title: "Transactions", value: "0", label: "Today" },
-  { title: "Waste Logged", value: "0", label: "Items" },
-  { title: "Shift Status", value: "Open", label: "Active shift" },
-];
+import { getStaffDashboardSnapshot, type StaffDashboardSnapshot } from "@/lib/services/dashboard";
+import { validateStoredStaffSession, type StaffSession } from "@/lib/services/auth";
+import { getBusinessDayStatus } from "@/lib/services/operations";
+import { getMainStall } from "@/lib/services/stalls";
+import { subscribeDashboardRefresh } from "@/lib/utils/dashboard-refresh";
+import { formatCurrency, formatDate } from "@/lib/utils/format";
 
 const STAFF_ACTIONS = [
   {
@@ -61,15 +59,55 @@ const STAFF_ACTIONS = [
 export default function StaffPage() {
   const [staff, setStaff] = useState<StaffSession | null>(null);
   const [time, setTime] = useState("");
+  const [summary, setSummary] = useState<StaffDashboardSnapshot | null>(null);
+  const [stallId, setStallId] = useState("");
+  const [canEndShift, setCanEndShift] = useState(false);
+  const [metricsLoading, setMetricsLoading] = useState(true);
+  const [metricsError, setMetricsError] = useState<string | null>(null);
+
+  async function loadStaff() {
+    try {
+      setStaff(await validateStoredStaffSession());
+    } catch {
+      setStaff(null);
+    }
+  }
+
+  async function loadSnapshot() {
+    setMetricsLoading(true);
+
+    try {
+      const stall = await getMainStall();
+      const [nextSummary, status] = await Promise.all([
+        getStaffDashboardSnapshot(stall.id),
+        getBusinessDayStatus(),
+      ]);
+
+      setStallId(stall.id);
+      setCanEndShift(status.can_end_shift);
+      setSummary(nextSummary);
+      setMetricsError(null);
+    } catch (error) {
+      console.error(error);
+      setMetricsError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load dashboard totals."
+      );
+    } finally {
+      setMetricsLoading(false);
+    }
+  }
 
   useEffect(() => {
-    setStaff(getStoredStaffSession());
+    void Promise.all([loadStaff(), loadSnapshot()]);
 
     function updateTime() {
       setTime(
         new Date().toLocaleTimeString("en-KE", {
           hour: "2-digit",
           minute: "2-digit",
+          timeZone: "Africa/Nairobi",
         })
       );
     }
@@ -79,6 +117,61 @@ export default function StaffPage() {
     const timer = setInterval(updateTime, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    return subscribeDashboardRefresh(() => {
+      void loadSnapshot();
+    });
+  }, []);
+
+  useEffect(() => {
+    console.log("STAFF SUMMARY", summary);
+  }, [summary]);
+
+  const staffStats = [
+    {
+      title: "Today Sales",
+      value: metricsLoading
+        ? "Loading..."
+        : formatCurrency(summary?.todaySales),
+      label: metricsError
+        ? metricsError
+        : summary?.businessDate
+          ? `Business date ${formatDate(summary.businessDate)}`
+          : "No sales recorded yet",
+    },
+    {
+      title: "Transactions",
+      value: metricsLoading ? "..." : String(summary?.transactionCount || 0),
+      label: metricsError
+        ? "Refresh required"
+        : summary
+          ? `${summary.transactionCount} sale${summary.transactionCount === 1 ? "" : "s"} today`
+          : "No transactions yet",
+    },
+    {
+      title: "Waste Logged",
+      value: metricsLoading ? "..." : String(summary?.wasteLogged || 0),
+      label: metricsError
+        ? "Refresh required"
+        : summary
+          ? `${summary.totalWasteQuantity} item${summary.totalWasteQuantity === 1 ? "" : "s"} affected`
+          : "No waste recorded yet",
+    },
+    {
+      title: "Shift Status",
+      value: metricsLoading
+        ? "..."
+        : canEndShift
+          ? "Ready"
+          : "Open",
+      label: metricsError
+        ? "Unable to verify shift state"
+        : canEndShift
+          ? "Closing tasks complete"
+          : "Active business day",
+    },
+  ];
 
   return (
     <main className="min-h-screen bg-[#070503] text-white">
@@ -109,13 +202,21 @@ export default function StaffPage() {
               {time || "--:--"}
             </p>
             <p className="mt-1 text-xs uppercase tracking-widest text-zinc-500">
-              Main Candy Stall
+              {stallId
+                ? `Stall ${stallId.slice(0, 8)}`
+                : "Active Stall"}
             </p>
           </div>
         </div>
 
+        {metricsError && (
+          <div className="mt-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-100">
+            {metricsError}
+          </div>
+        )}
+
         <div className="mt-8 grid gap-6 md:grid-cols-4">
-          {STAFF_STATS.map((stat) => (
+          {staffStats.map((stat) => (
             <DashboardMetricCard
               key={stat.title}
               title={stat.title}

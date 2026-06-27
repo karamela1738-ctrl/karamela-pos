@@ -5,10 +5,13 @@ import {
   getProducts,
   type Product,
 } from "@/lib/services/inventory";
+import { logDashboardQuery } from "@/lib/services/dashboard";
 import { getMainStall } from "@/lib/services/stalls";
 import { supabase } from "@/lib/supabase/client";
 import { recordWasteWorkflow } from "@/lib/services/workflows";
+import { triggerDashboardRefresh } from "@/lib/utils/dashboard-refresh";
 import { formatCurrency } from "@/lib/utils/format";
+import { getEffectiveWasteValue } from "@/lib/utils/waste";
 
 type WasteLog = {
   id: string;
@@ -39,6 +42,8 @@ export default function WastePage() {
   const [reason, setReason] = useState("damaged");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
+  const [logsLoaded, setLogsLoaded] = useState(false);
+  const [logsError, setLogsError] = useState<string | null>(null);
 
   async function loadProducts() {
     try {
@@ -49,18 +54,40 @@ export default function WastePage() {
   }
 
   async function loadLogs() {
-    const { data, error } = await supabase
-      .from("waste_logs")
-      .select("id, product_id, quantity, reason, value_amount, notes, created_at")
-      .order("created_at", { ascending: false })
-      .limit(20);
+    try {
+      const stall = await getMainStall();
 
-    if (error) {
+      if (!stall) {
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("waste_logs")
+        .select("id, product_id, quantity, reason, value_amount, notes, created_at")
+        .eq("stall_id", stall.id)
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      setLogs(data || []);
+      setLogsError(null);
+      setLogsLoaded(true);
+
+      logDashboardQuery("waste-logs", {
+        stall_id: stall.id,
+        date_range: "latest 20 rows",
+        row_count: (data || []).length,
+      });
+    } catch (error) {
       console.error("Waste logs error:", error);
-      return;
+      setLogsError(
+        error instanceof Error ? error.message : "Unable to load waste logs."
+      );
+      setLogsLoaded(true);
     }
-
-    setLogs(data || []);
   }
 
   useEffect(() => {
@@ -72,10 +99,35 @@ export default function WastePage() {
     () => new Map(products.map((product) => [product.id, product])),
     [products]
   );
+  const displayLogs = useMemo(
+    () =>
+      logs.map((log) => ({
+        ...log,
+        effectiveValue: getEffectiveWasteValue({
+          valueAmount: log.value_amount,
+          quantity: log.quantity,
+          sellingPrice: productMap.get(log.product_id)?.selling_price,
+          costPrice: productMap.get(log.product_id)?.cost_price,
+        }),
+      })),
+    [logs, productMap]
+  );
 
   const selectedProduct = productMap.get(productId);
   const wasteValue =
     Number(quantity || 0) * Number(selectedProduct?.selling_price || 0);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[waste:logs]", {
+        rowCount: displayLogs.length,
+        wasteValue: displayLogs.reduce(
+          (sum, log) => sum + Number(log.effectiveValue || 0),
+          0
+        ),
+      });
+    }
+  }, [displayLogs]);
 
   async function recordWaste(event: React.FormEvent) {
     event.preventDefault();
@@ -109,6 +161,7 @@ export default function WastePage() {
       setNotes("");
 
       await Promise.all([loadProducts(), loadLogs()]);
+      triggerDashboardRefresh("waste");
       alert("Waste recorded successfully");
     } catch (error) {
       alert(
@@ -200,19 +253,35 @@ export default function WastePage() {
           </thead>
 
           <tbody>
-            {logs.map((log) => (
+            {displayLogs.map((log) => (
               <tr key={log.id} className="border-t border-white/10">
                 <td className="p-4">
                   {productMap.get(log.product_id)?.product_name || "Unknown"}
                 </td>
                 <td className="p-4">{log.quantity}</td>
                 <td className="p-4 capitalize text-[#d08a35]">{log.reason}</td>
-                <td className="p-4">{formatCurrency(log.value_amount)}</td>
+                <td className="p-4">{formatCurrency(log.effectiveValue)}</td>
                 <td className="p-4 text-zinc-400">{log.notes || "-"}</td>
               </tr>
             ))}
 
-            {logs.length === 0 && (
+            {logsError && logs.length === 0 && (
+              <tr>
+                <td colSpan={5} className="p-6 text-center text-amber-200">
+                  {logsError}
+                </td>
+              </tr>
+            )}
+
+            {!logsError && !logsLoaded && logs.length === 0 && (
+              <tr>
+                <td colSpan={5} className="p-6 text-center text-zinc-500">
+                  Loading waste logs...
+                </td>
+              </tr>
+            )}
+
+            {!logsError && logsLoaded && logs.length === 0 && (
               <tr>
                 <td colSpan={5} className="p-6 text-center text-zinc-500">
                   No waste recorded yet.

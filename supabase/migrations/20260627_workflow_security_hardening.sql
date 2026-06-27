@@ -1,9 +1,11 @@
-alter table public.sales
-add column if not exists client_reference text;
-
-create unique index if not exists sales_stall_id_client_reference_idx
-  on public.sales (stall_id, client_reference)
-  where client_reference is not null;
+drop function if exists public.complete_sale(uuid, text, numeric, text, jsonb);
+drop function if exists public.complete_sale(uuid, text, numeric, text, jsonb, text);
+drop function if exists public.restock_product(uuid, uuid, integer, text);
+drop function if exists public.record_waste(uuid, uuid, integer, text, text);
+drop function if exists public.submit_closing_stock(uuid, date, jsonb);
+drop function if exists public.save_payment_reconciliation(uuid, date, numeric, numeric, numeric, text);
+drop function if exists public.end_shift(text, uuid);
+drop function if exists public.end_shift(text, text);
 
 create or replace function public.complete_sale(
   p_stall_id uuid,
@@ -35,6 +37,7 @@ begin
   select *
   into v_staff
   from public.require_active_staff_session(p_session_token);
+
   v_staff_name := coalesce(nullif(trim(v_staff.full_name), ''), 'staff');
 
   perform public.require_staff_stall_access(v_staff.id, p_stall_id);
@@ -54,7 +57,7 @@ begin
     raise exception 'Cart is empty';
   end if;
 
-  insert into sales (
+  insert into public.sales (
     stall_id,
     cashier_id,
     total_amount,
@@ -89,7 +92,7 @@ begin
 
       select *
       into v_product
-      from products
+      from public.products
       where id = (v_item ->> 'product_id')::uuid
       for update;
 
@@ -103,7 +106,7 @@ begin
 
       v_total := v_total + (v_quantity * coalesce(v_product.selling_price, 0));
 
-      insert into sale_items (
+      insert into public.sale_items (
         sale_id,
         product_id,
         product_name,
@@ -122,7 +125,7 @@ begin
         v_quantity * coalesce(v_product.selling_price, 0)
       );
 
-      insert into inventory_movements (
+      insert into public.inventory_movements (
         stall_id,
         product_id,
         movement_type,
@@ -139,7 +142,7 @@ begin
         format('Sold by %s', v_staff_name)
       );
 
-      update products
+      update public.products
       set stock_qty = coalesce(stock_qty, 0) - v_quantity
       where id = v_product.id;
 
@@ -161,7 +164,7 @@ begin
       raise exception 'Amount paid cannot be less than the sale total';
     end if;
 
-    update sales
+    update public.sales
     set
       total_amount = v_total,
       amount_paid = v_amount_paid,
@@ -171,7 +174,7 @@ begin
   else
     select *
     into v_sale
-    from sales
+    from public.sales
     where stall_id = p_stall_id
       and client_reference = v_client_reference;
 
@@ -191,7 +194,7 @@ begin
       '[]'::jsonb
     )
     into v_items
-    from sale_items
+    from public.sale_items
     where sale_id = v_sale.id;
   end if;
 
@@ -223,7 +226,7 @@ set search_path = public
 as $$
 declare
   v_staff public.staff%rowtype;
-  v_product products%rowtype;
+  v_product public.products%rowtype;
   v_previous_stock numeric := 0;
   v_new_stock numeric := 0;
   v_notes text;
@@ -232,6 +235,7 @@ begin
   select *
   into v_staff
   from public.require_active_staff_session(p_session_token);
+
   v_staff_role := lower(coalesce(nullif(trim(v_staff.role), ''), 'staff'));
 
   if v_staff_role not in ('admin', 'manager', 'owner') then
@@ -246,7 +250,7 @@ begin
 
   select *
   into v_product
-  from products
+  from public.products
   where id = p_product_id
   for update;
 
@@ -266,11 +270,11 @@ begin
     )
   );
 
-  update products
+  update public.products
   set stock_qty = v_new_stock
   where id = p_product_id;
 
-  insert into inventory_movements (
+  insert into public.inventory_movements (
     stall_id,
     product_id,
     movement_type,
@@ -312,10 +316,10 @@ set search_path = public
 as $$
 declare
   v_staff public.staff%rowtype;
-  v_product products%rowtype;
+  v_product public.products%rowtype;
   v_new_stock numeric := 0;
   v_value_amount numeric := 0;
-  v_waste_id waste_logs.id%type;
+  v_waste_id public.waste_logs.id%type;
   v_notes text := coalesce(nullif(trim(p_notes), ''), 'No notes');
   v_reason text := coalesce(nullif(trim(p_reason), ''), 'other');
 begin
@@ -331,7 +335,7 @@ begin
 
   select *
   into v_product
-  from products
+  from public.products
   where id = p_product_id
   for update;
 
@@ -346,7 +350,7 @@ begin
   v_value_amount := p_quantity * coalesce(v_product.selling_price, 0);
   v_new_stock := coalesce(v_product.stock_qty, 0) - p_quantity;
 
-  insert into waste_logs (
+  insert into public.waste_logs (
     stall_id,
     product_id,
     quantity,
@@ -364,7 +368,7 @@ begin
   )
   returning id into v_waste_id;
 
-  insert into inventory_movements (
+  insert into public.inventory_movements (
     stall_id,
     product_id,
     movement_type,
@@ -384,7 +388,7 @@ begin
     )
   );
 
-  update products
+  update public.products
   set stock_qty = v_new_stock
   where id = p_product_id;
 
@@ -414,8 +418,8 @@ set search_path = public
 as $$
 declare
   v_staff public.staff%rowtype;
-  v_product products%rowtype;
-  v_count closing_stock_counts%rowtype;
+  v_product public.products%rowtype;
+  v_count public.closing_stock_counts%rowtype;
   v_entry jsonb;
   v_expected numeric := 0;
   v_actual numeric := 0;
@@ -450,7 +454,7 @@ begin
 
     select *
     into v_product
-    from products
+    from public.products
     where id = (v_entry ->> 'product_id')::uuid
     for update;
 
@@ -460,7 +464,7 @@ begin
 
     v_expected := coalesce(v_product.stock_qty, 0);
 
-    insert into closing_stock_counts (
+    insert into public.closing_stock_counts (
       stall_id,
       product_id,
       business_date,
@@ -484,12 +488,12 @@ begin
       notes = excluded.notes
     returning * into v_count;
 
-    delete from inventory_movements
+    delete from public.inventory_movements
     where movement_type = 'closing_variance'
       and reference_id = v_count.id;
 
     if coalesce(v_count.variance_quantity, 0) <> 0 then
-      insert into inventory_movements (
+      insert into public.inventory_movements (
         stall_id,
         product_id,
         movement_type,
@@ -514,7 +518,7 @@ begin
       v_variance_count := v_variance_count + 1;
     end if;
 
-    update products
+    update public.products
     set stock_qty = v_actual
     where id = v_product.id;
 
@@ -547,7 +551,7 @@ set search_path = public
 as $$
 declare
   v_staff public.staff%rowtype;
-  v_record payment_reconciliations%rowtype;
+  v_record public.payment_reconciliations%rowtype;
   v_cash_expected numeric := 0;
   v_mpesa_expected numeric := 0;
   v_card_expected numeric := 0;
@@ -556,6 +560,7 @@ begin
   select *
   into v_staff
   from public.require_active_staff_session(p_session_token);
+
   v_staff_role := lower(coalesce(nullif(trim(v_staff.role), ''), 'staff'));
 
   if v_staff_role not in ('admin', 'manager', 'owner') then
@@ -576,12 +581,12 @@ begin
     v_cash_expected,
     v_mpesa_expected,
     v_card_expected
-  from sales
+  from public.sales
   where stall_id = p_stall_id
     and created_at >= p_business_date
     and created_at < (p_business_date + interval '1 day');
 
-  insert into payment_reconciliations (
+  insert into public.payment_reconciliations (
     stall_id,
     business_date,
     cash_expected,
@@ -637,9 +642,6 @@ $$;
 
 grant execute on function public.save_payment_reconciliation(uuid, date, numeric, numeric, numeric, text, text) to anon, authenticated;
 
-drop function if exists public.end_shift(text, text);
-drop function if exists public.end_shift(text, uuid);
-
 create or replace function public.end_shift(
   p_action text,
   p_session_token text
@@ -658,7 +660,7 @@ begin
   into v_staff
   from public.require_active_staff_session(p_session_token);
 
-  insert into shift_logs (
+  insert into public.shift_logs (
     staff_id,
     action,
     created_at

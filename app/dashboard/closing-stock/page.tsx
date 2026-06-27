@@ -2,8 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getProducts, type Product } from "@/lib/services/inventory";
+import {
+  getBusinessDayStatus,
+  type BusinessDayStatus,
+} from "@/lib/services/operations";
 import { getMainStall } from "@/lib/services/stalls";
 import { submitClosingStockWorkflow } from "@/lib/services/workflows";
+import { triggerDashboardRefresh } from "@/lib/utils/dashboard-refresh";
+import { formatDate } from "@/lib/utils/format";
 
 type CountItem = {
   product_id: string;
@@ -16,6 +22,7 @@ export default function ClosingStockPage() {
   const [counts, setCounts] = useState<Record<string, CountItem>>({});
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<BusinessDayStatus | null>(null);
 
   async function loadProducts() {
     try {
@@ -26,8 +33,20 @@ export default function ClosingStockPage() {
   }
 
   useEffect(() => {
-    void loadProducts();
+    void Promise.all([loadProducts(), loadStatus()]);
   }, []);
+
+  async function loadStatus() {
+    try {
+      setStatus(await getBusinessDayStatus());
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Unable to load business day status."
+      );
+    }
+  }
 
   const filteredProducts = useMemo(
     () =>
@@ -65,6 +84,11 @@ export default function ClosingStockPage() {
       return;
     }
 
+    if (status?.closing_stock_complete) {
+      alert("Closing stock has already been submitted for this business date.");
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -77,7 +101,7 @@ export default function ClosingStockPage() {
 
       await submitClosingStockWorkflow({
         stallId: stall.id,
-        businessDate: new Date().toISOString().slice(0, 10),
+        businessDate: status?.business_date || "",
         counts: countEntries.map((item) => ({
           productId: item.product_id,
           actualQuantity: Number(item.actual_quantity || 0),
@@ -86,7 +110,8 @@ export default function ClosingStockPage() {
       });
 
       setCounts({});
-      await loadProducts();
+      await Promise.all([loadProducts(), loadStatus()]);
+      triggerDashboardRefresh("closing-stock");
       alert("Closing stock saved successfully");
     } catch (error) {
       alert(
@@ -120,6 +145,9 @@ export default function ClosingStockPage() {
             Count actual stock at the end of the day. The system compares it
             against expected stock.
           </p>
+          <p className="mt-3 text-sm text-zinc-500">
+            Business date: {status?.business_date ? formatDate(status.business_date) : "--"}
+          </p>
         </div>
 
         <button
@@ -131,6 +159,13 @@ export default function ClosingStockPage() {
           {loading ? "Saving..." : "Save Closing Count"}
         </button>
       </div>
+
+      {status?.closing_stock_complete && (
+        <div className="mt-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-100">
+          Closing stock is already locked for this business date. Same-day edits
+          are blocked to preserve the audit trail.
+        </div>
+      )}
 
       <input
         placeholder="Search product..."

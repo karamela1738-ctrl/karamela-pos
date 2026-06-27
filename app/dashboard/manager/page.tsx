@@ -7,94 +7,70 @@ import {
   DashboardInsightsSection,
   DashboardMetricCard,
 } from "@/components/dashboard/ui";
-import { supabase } from "@/lib/supabase/client";
-import { clearStoredStaffSession } from "@/lib/services/auth";
-import { formatCurrency } from "@/lib/utils/format";
-
-type Product = {
-  id: string;
-  stock_qty: number | null;
-  cost_price: number | null;
-  reorder_level: number | null;
-};
-
-type Sale = {
-  id: string;
-  total_amount: number | null;
-  created_at: string;
-};
-
-type WasteLog = {
-  id: string;
-  value_amount: number | null;
-  created_at: string;
-};
+import { logoutStaffSession } from "@/lib/services/auth";
+import {
+  getOwnerDashboardSnapshot,
+  type OwnerDashboardSnapshot,
+} from "@/lib/services/operations";
+import { subscribeDashboardRefresh } from "@/lib/utils/dashboard-refresh";
+import { formatCurrency, formatDate } from "@/lib/utils/format";
 
 export default function OwnerDashboard() {
   const router = useRouter();
-  const [products, setProducts] = useState<Product[]>([]);
-  const [sales, setSales] = useState<Sale[]>([]);
-  const [waste, setWaste] = useState<WasteLog[]>([]);
+  const [snapshot, setSnapshot] = useState<OwnerDashboardSnapshot | null>(null);
 
   async function loadData() {
-    const { data: productData } = await supabase
-      .from("products")
-      .select("id, stock_qty, cost_price, reorder_level");
-
-    const { data: salesData } = await supabase
-      .from("sales")
-      .select("id,total_amount,created_at");
-
-    const { data: wasteData } = await supabase
-      .from("waste_logs")
-      .select("id,value_amount,created_at");
-
-    setProducts(productData || []);
-    setSales(salesData || []);
-    setWaste(wasteData || []);
+    try {
+      setSnapshot(await getOwnerDashboardSnapshot());
+    } catch (error) {
+      console.error(error);
+    }
   }
 
   useEffect(() => {
     loadData();
   }, []);
 
-  const today = new Date().toISOString().slice(0, 10);
+  useEffect(() => {
+    return subscribeDashboardRefresh(() => {
+      void loadData();
+    });
+  }, []);
 
-  const todaySales = sales
-    .filter((sale) => sale.created_at?.startsWith(today))
-    .reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0);
-
-  const todayWaste = waste
-    .filter((log) => log.created_at?.startsWith(today))
-    .reduce((sum, log) => sum + Number(log.value_amount || 0), 0);
-
-  const inventoryValue = products.reduce((sum, product) => {
-    return sum + Number(product.stock_qty || 0) * Number(product.cost_price || 0);
-  }, 0);
-
-  const lowStock = products.filter(
-    (product) =>
-      Number(product.stock_qty || 0) > 0 &&
-      Number(product.stock_qty || 0) <= Number(product.reorder_level || 5)
-  ).length;
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") {
+      console.log("OWNER SNAPSHOT", snapshot);
+    }
+  }, [snapshot]);
 
   const insights = useMemo(
     () => [
-      todaySales > 0
-        ? `Today's sales stand at ${formatCurrency(todaySales)}.`
+      (snapshot?.today_sales || 0) > 0
+        ? `Today's sales stand at ${formatCurrency(snapshot?.today_sales)}.`
         : "No sales recorded today yet.",
-      todayWaste > 0
-        ? `Waste today is ${formatCurrency(todayWaste)}. Review shrinkage.`
+      (snapshot?.today_waste || 0) > 0
+        ? `Waste today is ${formatCurrency(snapshot?.today_waste)}. Review shrinkage.`
         : "No waste recorded today.",
-      lowStock > 0
-        ? `${lowStock} products are at or below reorder level.`
+      (snapshot?.low_stock_count || 0) > 0
+        ? `${snapshot?.low_stock_count} products are at or below reorder level.`
         : "Stock levels look healthy.",
+      snapshot?.closing_stock_complete
+        ? "Closing stock is locked for the current business date."
+        : `Closing stock still needs ${Math.max(
+            (snapshot?.total_products || 0) - (snapshot?.counted_products || 0),
+            0
+          )} product counts.`,
+      snapshot?.reconciliation_complete
+        ? `Reconciliation recorded. Variance ${formatCurrency(
+            snapshot?.reconciliation_variance
+          )}.`
+        : "Payment reconciliation is still pending.",
     ],
-    [todaySales, todayWaste, lowStock]
+    [snapshot]
   );
 
-  function logout() {
-    clearStoredStaffSession();
+  async function logout() {
+    await logoutStaffSession();
     router.replace("/login");
   }
 
@@ -123,7 +99,9 @@ export default function OwnerDashboard() {
               <div className="rounded-3xl border border-white/10 bg-black/30 px-6 py-4">
                 <p className="text-sm text-zinc-400">Today</p>
                 <p className="text-2xl font-bold text-[#d08a35]">
-                  {new Date().toLocaleDateString()}
+                  {snapshot?.business_date
+                    ? formatDate(snapshot.business_date)
+                    : new Date().toLocaleDateString()}
                 </p>
               </div>
 
@@ -141,23 +119,28 @@ export default function OwnerDashboard() {
         <div className="mt-8 grid gap-5 md:grid-cols-4">
           <DashboardMetricCard
             title="Today's Sales"
-            value={formatCurrency(todaySales)}
+            value={formatCurrency(snapshot?.today_sales)}
             accentClassName="text-white font-black"
           />
           <DashboardMetricCard
             title="Inventory Value"
-            value={formatCurrency(inventoryValue)}
+            value={formatCurrency(snapshot?.inventory_value)}
             accentClassName="text-white font-black"
           />
           <DashboardMetricCard
             title="Waste Today"
-            value={formatCurrency(todayWaste)}
+            value={formatCurrency(snapshot?.today_waste)}
             accentClassName="text-white font-black"
           />
           <DashboardMetricCard
             title="Low Stock"
-            value={lowStock.toString()}
+            value={String(snapshot?.low_stock_count || 0)}
             accentClassName="text-white font-black"
+            footer={
+              <p className="mt-2 text-xs text-zinc-400">
+                {snapshot?.counted_products || 0}/{snapshot?.total_products || 0} products counted for close
+              </p>
+            }
           />
         </div>
 
@@ -204,6 +187,12 @@ export default function OwnerDashboard() {
             title="Staff Activity"
             description="Monitor staff sales, waste, closing count and shift activity."
             href="/dashboard/staff-activity"
+          />
+
+          <DashboardActionCard
+            title="Inventory Movements"
+            description="Audit stock changes with actor names, references and movement notes."
+            href="/dashboard/inventory-movements"
           />
         </div>
       </section>

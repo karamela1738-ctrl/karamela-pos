@@ -7,94 +7,26 @@ import {
   DashboardPageHeader,
   DashboardPeriodSelect,
 } from "@/components/dashboard/ui";
-import { supabase } from "@/lib/supabase/client";
+import {
+  getStaffActivityFeed,
+  type StaffActivityItem,
+} from "@/lib/services/operations";
 import { formatCurrency, formatDateTime } from "@/lib/utils/format";
 import {
   isDateWithinPeriod,
   type DashboardPeriod,
 } from "@/lib/utils/period";
 
-type Activity = {
-  id: string;
-  type: string;
-  description: string;
-  amount?: number;
-  created_at: string;
-};
-
 export default function StaffActivityPage() {
-  const [activities, setActivities] = useState<Activity[]>([]);
+  const [activities, setActivities] = useState<StaffActivityItem[]>([]);
   const [period, setPeriod] = useState<DashboardPeriod>("today");
 
   async function loadActivity() {
-    const [salesRes, wasteRes, closingRes, reconRes, shiftRes] =
-      await Promise.all([
-        supabase.from("sales").select("id,total_amount,payment_method,created_at"),
-        supabase
-          .from("waste_logs")
-          .select("id,quantity,reason,value_amount,created_at"),
-        supabase.from("closing_stock_counts").select("id,business_date,created_at"),
-        supabase
-          .from("payment_reconciliations")
-          .select("id,business_date,variance,created_at"),
-        supabase.from("shift_logs").select("id,action,created_at"),
-      ]);
-
-    const saleActivities =
-      salesRes.data?.map((sale) => ({
-        id: sale.id,
-        type: "Sale",
-        description: `${sale.payment_method} sale completed`,
-        amount: Number(sale.total_amount || 0),
-        created_at: sale.created_at,
-      })) || [];
-
-    const wasteActivities =
-      wasteRes.data?.map((waste) => ({
-        id: waste.id,
-        type: "Waste",
-        description: `${waste.quantity} item(s) recorded as ${waste.reason}`,
-        amount: Number(waste.value_amount || 0),
-        created_at: waste.created_at,
-      })) || [];
-
-    const closingActivities =
-      closingRes.data?.map((item) => ({
-        id: item.id,
-        type: "Closing Stock",
-        description: `Closing stock count submitted for ${item.business_date}`,
-        created_at: item.created_at,
-      })) || [];
-
-    const reconciliationActivities =
-      reconRes.data?.map((item) => ({
-        id: item.id,
-        type: "Reconciliation",
-        description: `Payment reconciliation completed. Variance ${formatCurrency(item.variance || 0)}`,
-        amount: Number(item.variance || 0),
-        created_at: item.created_at,
-      })) || [];
-
-    const shiftActivities =
-      shiftRes.data?.map((shift) => ({
-        id: shift.id,
-        type: "Shift",
-        description: shift.action || "Shift activity",
-        created_at: shift.created_at,
-      })) || [];
-
-    setActivities(
-      [
-        ...saleActivities,
-        ...wasteActivities,
-        ...closingActivities,
-        ...reconciliationActivities,
-        ...shiftActivities,
-      ].sort(
-        (a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      )
-    );
+    try {
+      setActivities(await getStaffActivityFeed());
+    } catch (error) {
+      console.error(error);
+    }
   }
 
   useEffect(() => {
@@ -110,16 +42,16 @@ export default function StaffActivityPage() {
   );
 
   const salesCount = filteredActivities.filter(
-    (item) => item.type === "Sale"
+    (item) => item.activity_type === "Sale"
   ).length;
   const wasteCount = filteredActivities.filter(
-    (item) => item.type === "Waste"
+    (item) => item.activity_type === "Waste"
   ).length;
   const closingCount = filteredActivities.filter(
-    (item) => item.type === "Closing Stock"
+    (item) => item.activity_type === "Closing Stock"
   ).length;
   const reconciliationCount = filteredActivities.filter(
-    (item) => item.type === "Reconciliation"
+    (item) => item.activity_type === "Reconciliation"
   ).length;
 
   const insights = [
@@ -180,14 +112,19 @@ export default function StaffActivityPage() {
           <tbody>
             {filteredActivities.map((item) => (
               <tr
-                key={`${item.type}-${item.id}`}
+                key={item.activity_id}
                 className="border-t border-white/10"
               >
                 <td className="p-4 text-zinc-400">{formatDateTime(item.created_at)}</td>
-                <td className="p-4 font-bold text-[#d08a35]">{item.type}</td>
-                <td className="p-4">{item.description}</td>
+                <td className="p-4 font-bold text-[#d08a35]">{item.activity_type}</td>
                 <td className="p-4">
-                  {item.amount !== undefined ? formatCurrency(item.amount) : "-"}
+                  <div>{item.description}</div>
+                  <div className="mt-1 text-xs text-zinc-500">
+                    By {item.staff_name}
+                  </div>
+                </td>
+                <td className="p-4">
+                  {item.amount !== null ? formatCurrency(item.amount) : "-"}
                 </td>
               </tr>
             ))}

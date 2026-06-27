@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase/client";
+import { getStoredStaffSession } from "@/lib/services/auth";
 import type { ReceiptItem, ReceiptPayload } from "@/lib/utils/receipt";
 
 type WorkflowResult = Record<string, unknown>;
@@ -8,6 +9,8 @@ type CompleteSaleRpcParams = {
   p_payment_method: string;
   p_amount_paid: number;
   p_staff_name: string | null;
+  p_client_reference: string;
+  p_session_token: string;
   p_items: Array<{
     product_id: string;
     quantity: number;
@@ -19,6 +22,7 @@ type RestockProductRpcParams = {
   p_product_id: string;
   p_quantity: number;
   p_notes: string | null;
+  p_session_token: string;
 };
 
 type RecordWasteRpcParams = {
@@ -27,11 +31,13 @@ type RecordWasteRpcParams = {
   p_quantity: number;
   p_reason: string;
   p_notes: string | null;
+  p_session_token: string;
 };
 
 type SubmitClosingStockRpcParams = {
   p_stall_id: string;
   p_business_date: string;
+  p_session_token: string;
   p_counts: Array<{
     product_id: string;
     actual_quantity: number;
@@ -46,11 +52,12 @@ type SavePaymentReconciliationRpcParams = {
   p_mpesa_confirmed: number;
   p_card_confirmed: number;
   p_notes: string | null;
+  p_session_token: string;
 };
 
 type EndShiftRpcParams = {
   p_action: string;
-  p_staff_id: string;
+  p_session_token: string;
 };
 
 export type SaleWorkflowItemInput = {
@@ -157,24 +164,38 @@ function readReceiptItems(result: WorkflowResult) {
   });
 }
 
+function getRequiredSessionToken() {
+  const session = getStoredStaffSession();
+
+  if (!session?.session_token) {
+    throw new Error("Staff session has expired. Please sign in again.");
+  }
+
+  return session.session_token;
+}
+
 export async function completeSaleWorkflow({
   stallId,
   paymentMethod,
   amountPaid,
-  staffName,
+  clientReference,
   items,
 }: {
   stallId: string;
   paymentMethod: string;
   amountPaid: number;
-  staffName?: string;
+  clientReference: string;
   items: SaleWorkflowItemInput[];
 }) {
+  const sessionToken = getRequiredSessionToken();
+
   const params: CompleteSaleRpcParams = {
     p_stall_id: stallId,
     p_payment_method: paymentMethod,
     p_amount_paid: amountPaid,
-    p_staff_name: staffName || null,
+    p_staff_name: null,
+    p_client_reference: clientReference,
+    p_session_token: sessionToken,
     p_items: items.map((item) => ({
       product_id: item.productId,
       quantity: item.quantity,
@@ -203,11 +224,14 @@ export async function restockProductWorkflow({
   quantity,
   notes,
 }: RestockWorkflowInput) {
+  const sessionToken = getRequiredSessionToken();
+
   const params: RestockProductRpcParams = {
     p_stall_id: stallId,
     p_product_id: productId,
     p_quantity: quantity,
     p_notes: notes || null,
+    p_session_token: sessionToken,
   };
 
   const result = requireWorkflowResult(
@@ -228,12 +252,15 @@ export async function recordWasteWorkflow({
   reason,
   notes,
 }: WasteWorkflowInput) {
+  const sessionToken = getRequiredSessionToken();
+
   const params: RecordWasteRpcParams = {
     p_stall_id: stallId,
     p_product_id: productId,
     p_quantity: quantity,
     p_reason: reason,
     p_notes: notes || null,
+    p_session_token: sessionToken,
   };
 
   const result = requireWorkflowResult(
@@ -253,9 +280,12 @@ export async function submitClosingStockWorkflow({
   businessDate,
   counts,
 }: ClosingStockWorkflowInput) {
+  const sessionToken = getRequiredSessionToken();
+
   const params: SubmitClosingStockRpcParams = {
     p_stall_id: stallId,
     p_business_date: businessDate,
+    p_session_token: sessionToken,
     p_counts: counts.map((item) => ({
       product_id: item.productId,
       actual_quantity: item.actualQuantity,
@@ -282,6 +312,8 @@ export async function savePaymentReconciliationWorkflow({
   cardConfirmed,
   notes,
 }: ReconciliationWorkflowInput) {
+  const sessionToken = getRequiredSessionToken();
+
   const params: SavePaymentReconciliationRpcParams = {
     p_stall_id: stallId,
     p_business_date: businessDate,
@@ -289,6 +321,7 @@ export async function savePaymentReconciliationWorkflow({
     p_mpesa_confirmed: mpesaConfirmed,
     p_card_confirmed: cardConfirmed,
     p_notes: notes || null,
+    p_session_token: sessionToken,
   };
 
   const result = requireWorkflowResult(
@@ -304,10 +337,12 @@ export async function savePaymentReconciliationWorkflow({
   };
 }
 
-export async function endShiftWorkflow(staffId: string) {
+export async function endShiftWorkflow() {
+  const sessionToken = getRequiredSessionToken();
+
   const params: EndShiftRpcParams = {
     p_action: "shift_closed",
-    p_staff_id: staffId,
+    p_session_token: sessionToken,
   };
 
   return requireWorkflowResult(

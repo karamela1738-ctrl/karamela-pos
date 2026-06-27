@@ -2,13 +2,21 @@ import { supabase } from "@/lib/supabase/client";
 
 export const STAFF_SESSION_KEY = "karamela_staff_session";
 const LEGACY_STAFF_KEY = "karamela_staff";
+const STAFF_DEVICE_KEY = "karamela_staff_device";
 
-export type StaffRole = "admin" | "manager" | "staff";
+export type StaffRole =
+  | "admin"
+  | "owner"
+  | "manager"
+  | "staff"
+  | "cashier";
 
 export type StaffSession = {
   id: string;
   full_name: string;
   role: StaffRole;
+  session_token: string;
+  expires_at: string;
 };
 
 type StaffRecord = Partial<StaffSession> & {
@@ -18,12 +26,11 @@ type StaffRecord = Partial<StaffSession> & {
 
 export async function loginWithPin(pin: string) {
   const normalizedPin = pin.trim();
-
-  const { data, error } = await supabase
-    .from("staff")
-    .select("id, full_name, role")
-    .eq("pin_code", normalizedPin)
-    .maybeSingle();
+  const { data, error } = await supabase.rpc("login_staff", {
+    p_pin_code: normalizedPin,
+    p_device_key: getOrCreateStaffDeviceKey(),
+    p_user_agent: getBrowserUserAgent(),
+  });
 
   if (error) {
     throw new Error(error.message);
@@ -70,7 +77,7 @@ export function getStoredStaffSession() {
     const parsed = JSON.parse(rawSession) as Partial<StaffRecord>;
     const session = normalizeStaffSession(parsed);
 
-    if (!session) {
+    if (!session || isSessionExpired(session.expires_at)) {
       clearStoredStaffSession();
       return null;
     }
@@ -95,15 +102,63 @@ export function clearStoredStaffSession() {
   window.localStorage.removeItem(LEGACY_STAFF_KEY);
 }
 
+export async function validateStoredStaffSession() {
+  const session = getStoredStaffSession();
+
+  if (!session?.session_token) {
+    clearStoredStaffSession();
+    return null;
+  }
+
+  const { data, error } = await supabase.rpc("validate_staff_session", {
+    p_session_token: session.session_token,
+  });
+
+  if (error) {
+    clearStoredStaffSession();
+    throw new Error(error.message);
+  }
+
+  const normalizedSession = normalizeStaffSession(data as Partial<StaffRecord>);
+
+  if (!normalizedSession) {
+    clearStoredStaffSession();
+    return null;
+  }
+
+  persistStaffSession(normalizedSession);
+  return normalizedSession;
+}
+
+export async function logoutStaffSession() {
+  const session = getStoredStaffSession();
+
+  try {
+    if (session?.session_token) {
+      const { error } = await supabase.rpc("logout_staff_session", {
+        p_session_token: session.session_token,
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+    }
+  } finally {
+    clearStoredStaffSession();
+  }
+}
+
 export function getDefaultDashboardPath(role: StaffRole) {
-  return role === "staff" ? "/dashboard/staff" : "/dashboard/manager";
+  return role === "staff" || role === "cashier"
+    ? "/dashboard/staff"
+    : "/dashboard/manager";
 }
 
 export function canAccessDashboardPath(
   role: StaffRole,
   pathname: string
 ) {
-  if (role === "admin" || role === "manager") {
+  if (role === "admin" || role === "owner" || role === "manager") {
     return true;
   }
 
@@ -133,15 +188,32 @@ function normalizeStaffSession(data: Partial<StaffRecord> | null | undefined) {
     return null;
   }
 
+  const sessionToken =
+    typeof data?.session_token === "string" ? data.session_token.trim() : "";
+  const expiresAt =
+    typeof data?.expires_at === "string" ? data.expires_at.trim() : "";
+
+  if (!sessionToken || !expiresAt) {
+    return null;
+  }
+
   return {
     id: normalizedId,
     full_name: fullName || "Staff",
     role: normalizedRole || "staff",
+    session_token: sessionToken,
+    expires_at: expiresAt,
   };
 }
 
 function isStaffRole(role: unknown): role is StaffRole {
-  return role === "admin" || role === "manager" || role === "staff";
+  return (
+    role === "admin" ||
+    role === "owner" ||
+    role === "manager" ||
+    role === "staff" ||
+    role === "cashier"
+  );
 }
 
 function normalizeStaffRole(role: unknown): StaffRole | null {
@@ -155,13 +227,47 @@ function normalizeStaffRole(role: unknown): StaffRole | null {
     return "staff";
   }
 
-  if (normalized === "owner") {
-    return "manager";
-  }
-
-  if (normalized === "cashier" || normalized === "attendant") {
-    return "staff";
+  if (normalized === "attendant") {
+    return "cashier";
   }
 
   return isStaffRole(normalized) ? normalized : "staff";
+}
+
+function getOrCreateStaffDeviceKey() {
+  if (typeof window === "undefined") {
+    return "server-device";
+  }
+
+  const storedDeviceKey = window.localStorage.getItem(STAFF_DEVICE_KEY);
+
+  if (storedDeviceKey) {
+    return storedDeviceKey;
+  }
+
+  const deviceKey =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  window.localStorage.setItem(STAFF_DEVICE_KEY, deviceKey);
+  return deviceKey;
+}
+
+function getBrowserUserAgent() {
+  if (typeof navigator === "undefined") {
+    return null;
+  }
+
+  return navigator.userAgent || null;
+}
+
+function isSessionExpired(expiresAt: string) {
+  const sessionExpiry = new Date(expiresAt).getTime();
+
+  if (Number.isNaN(sessionExpiry)) {
+    return true;
+  }
+
+  return sessionExpiry <= Date.now();
 }

@@ -5,8 +5,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getDefaultDashboardPath,
-  getStoredStaffSession,
   loginWithPin,
+  validateStoredStaffSession,
 } from "@/lib/services/auth";
 
 const PIN_DOTS = [0, 1, 2, 3, 4, 5];
@@ -19,11 +19,19 @@ export default function LoginPage() {
   const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
-    const session = getStoredStaffSession();
+    async function restoreSession() {
+      try {
+        const session = await validateStoredStaffSession();
 
-    if (session) {
-      router.replace(getDefaultDashboardPath(session.role));
+        if (session) {
+          router.replace(getDefaultDashboardPath(session.role));
+        }
+      } catch {
+        // Ignore stale or invalid sessions and keep the user on the login screen.
+      }
     }
+
+    void restoreSession();
   }, [router]);
 
   function pressNumber(num: string) {

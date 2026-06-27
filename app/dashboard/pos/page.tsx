@@ -4,16 +4,20 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getProducts, type Product } from "@/lib/services/inventory";
 import { getMainStall } from "@/lib/services/stalls";
-import { getStoredStaffSession } from "@/lib/services/auth";
 import { completeSaleWorkflow } from "@/lib/services/workflows";
+import { triggerDashboardRefresh } from "@/lib/utils/dashboard-refresh";
 import { formatCurrency } from "@/lib/utils/format";
 import { writeStoredReceipt } from "@/lib/utils/receipt";
+import {
+  clearPendingSaleReference,
+  getOrCreatePendingSaleReference,
+} from "@/lib/utils/sale-reference";
 
 type CartItem = Product & {
   qty: number;
 };
 
-const PAYMENT_METHODS = ["cash", "mpesa", "card", "mixed"];
+const PAYMENT_METHODS = ["cash", "mpesa", "card"];
 
 export default function POSPage() {
   const router = useRouter();
@@ -95,7 +99,6 @@ export default function POSPage() {
     setLoading(true);
 
     try {
-      const staff = getStoredStaffSession();
       const stall = await getMainStall();
 
       if (!stall) {
@@ -104,11 +107,12 @@ export default function POSPage() {
       }
 
       const paidAmount = Number(amountPaid || total);
+      const clientReference = getOrCreatePendingSaleReference();
       const receipt = await completeSaleWorkflow({
         stallId: stall.id,
         paymentMethod,
         amountPaid: paidAmount,
-        staffName: staff?.full_name,
+        clientReference,
         items: cart.map((item) => ({
           productId: item.id,
           quantity: item.qty,
@@ -116,6 +120,8 @@ export default function POSPage() {
       });
 
       writeStoredReceipt(receipt);
+      clearPendingSaleReference();
+      triggerDashboardRefresh("sale");
 
       setCart([]);
       setAmountPaid("");

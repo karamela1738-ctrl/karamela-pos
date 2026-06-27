@@ -9,73 +9,71 @@ import {
   DashboardPanel,
   DashboardPeriodSelect,
 } from "@/components/dashboard/ui";
-import { supabase } from "@/lib/supabase/client";
-import { formatCurrency } from "@/lib/utils/format";
+import { logDashboardQuery } from "@/lib/services/dashboard";
 import {
-  isDateWithinPeriod,
-  type DashboardPeriod,
-} from "@/lib/utils/period";
-
-type ClosingCount = {
-  id: string;
-  product_id: string;
-  business_date: string;
-  expected_quantity: number;
-  actual_quantity: number;
-  variance_quantity: number;
-  notes: string | null;
-  created_at: string;
-};
-
-type Product = {
-  id: string;
-  product_name: string;
-  brand: string | null;
-  selling_price: number | null;
-  cost_price: number | null;
-};
+  getOwnerClosingStockRows,
+  type OwnerClosingStockRow,
+} from "@/lib/services/operations";
+import { subscribeDashboardRefresh } from "@/lib/utils/dashboard-refresh";
+import { formatCurrency } from "@/lib/utils/format";
+import { type DashboardPeriod } from "@/lib/utils/period";
 
 export default function OwnerClosingStockPage() {
-  const [counts, setCounts] = useState<ClosingCount[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [counts, setCounts] = useState<OwnerClosingStockRow[]>([]);
   const [period, setPeriod] = useState<DashboardPeriod>("today");
+  const [error, setError] = useState<string | null>(null);
 
   async function loadData() {
-    const [countResponse, productResponse] = await Promise.all([
-      supabase
-        .from("closing_stock_counts")
-        .select("*")
-        .order("business_date", { ascending: false }),
-      supabase
-        .from("products")
-        .select("id, product_name, brand, selling_price, cost_price"),
-    ]);
+    try {
+      const rows = await getOwnerClosingStockRows(period);
 
-    setCounts((countResponse.data || []) as ClosingCount[]);
-    setProducts((productResponse.data || []) as Product[]);
+      setCounts(rows);
+      setError(null);
+
+      logDashboardQuery("owner-closing-stock", {
+        period,
+        row_count: rows.length,
+      });
+
+      if (process.env.NODE_ENV !== "production") {
+        console.log("[owner-closing-stock]", {
+          period,
+          countRows: rows.length,
+        });
+      }
+    } catch (error) {
+      console.error(error);
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load closing stock analysis."
+      );
+      setCounts([]);
+    }
   }
 
   useEffect(() => {
     void loadData();
-  }, []);
+  }, [period]);
 
-  const productMap = useMemo(
-    () => new Map(products.map((product) => [product.id, product])),
-    [products]
-  );
-
-  const filteredCounts = useMemo(
-    () =>
-      counts.filter((item) => isDateWithinPeriod(item.business_date, period)),
-    [counts, period]
-  );
+  useEffect(() => {
+    return subscribeDashboardRefresh(() => {
+      void loadData();
+    });
+  }, [period]);
+  const filteredCounts = counts;
 
   function getProductName(productId: string) {
-    return productMap.get(productId)?.product_name || "Unknown Product";
+    return (
+      filteredCounts.find((item) => item.product_id === productId)?.product_name ||
+      "Unknown Product"
+    );
   }
 
   function getProductPrice(productId: string) {
-    return Number(productMap.get(productId)?.selling_price || 0);
+    return Number(
+      filteredCounts.find((item) => item.product_id === productId)?.selling_price || 0
+    );
   }
 
   const varianceRows = filteredCounts.filter(
@@ -127,7 +125,7 @@ export default function OwnerClosingStockPage() {
       }))
       .filter((item) => item.count > 1)
       .sort((a, b) => b.count - a.count);
-  }, [missingRows, productMap]);
+  }, [missingRows, filteredCounts]);
 
   const insights = [
     missingRows.length > 0
@@ -187,6 +185,12 @@ export default function OwnerClosingStockPage() {
 
   return (
     <main className="min-h-screen bg-[#080604] p-8 text-white">
+      {error && (
+        <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-100">
+          {error}
+        </div>
+      )}
+
       <DashboardPageHeader
         eyebrow="Owner Closing Stock"
         title="Closing Stock Control"
@@ -239,7 +243,7 @@ export default function OwnerClosingStockPage() {
           ) : (
             missingRows.slice(0, 8).map((item) => (
               <DashboardListRow
-                key={item.id}
+                key={item.count_id}
                 left={getProductName(item.product_id)}
                 right={`Missing ${Math.abs(Number(item.variance_quantity || 0))}`}
               />
@@ -294,7 +298,7 @@ export default function OwnerClosingStockPage() {
                 variance < 0 ? "Missing" : variance > 0 ? "Extra" : "Healthy";
 
               return (
-                <tr key={item.id} className="border-t border-white/10">
+                <tr key={item.count_id} className="border-t border-white/10">
                   <td className="p-4">{item.business_date}</td>
                   <td className="p-4">{getProductName(item.product_id)}</td>
                   <td className="p-4">{item.expected_quantity}</td>

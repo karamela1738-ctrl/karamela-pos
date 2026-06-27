@@ -7,21 +7,39 @@ import {
   DashboardMetricCard,
   DashboardPageHeader,
   DashboardPanel,
+  DashboardPeriodSelect,
 } from "@/components/dashboard/ui";
 import {
   getProducts,
-  getSaleItems,
   type Product,
-  type SaleItemSummary,
 } from "@/lib/services/inventory";
 import { getMainStall } from "@/lib/services/stalls";
+import { supabase } from "@/lib/supabase/client";
 import { restockProductWorkflow } from "@/lib/services/workflows";
 import { formatCurrency } from "@/lib/utils/format";
+import {
+  getPeriodDateRange,
+  type DashboardPeriod,
+} from "@/lib/utils/period";
+
+type Sale = {
+  id: string;
+  created_at: string;
+};
+
+type SaleItemSummary = {
+  sale_id: string;
+  product_id: string | null;
+  product_name: string;
+  quantity: number;
+  subtotal: number;
+};
 
 export default function OwnerInventoryPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [saleItems, setSaleItems] = useState<SaleItemSummary[]>([]);
   const [search, setSearch] = useState("");
+  const [period, setPeriod] = useState<DashboardPeriod>("30days");
 
   const [showAddInventory, setShowAddInventory] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState("");
@@ -31,13 +49,42 @@ export default function OwnerInventoryPage() {
 
   async function loadData() {
     try {
-      const [productData, salesData] = await Promise.all([
+      const stall = await getMainStall();
+
+      if (!stall) {
+        throw new Error("Could not find stall");
+      }
+
+      const dateRange = getPeriodDateRange(period);
+
+      let salesQuery = supabase
+        .from("sales")
+        .select("id,created_at")
+        .eq("stall_id", stall.id)
+        .order("created_at", { ascending: false });
+
+      if (dateRange) {
+        salesQuery = salesQuery
+          .gte("created_at", dateRange.start)
+          .lte("created_at", dateRange.end);
+      }
+
+      const [productData, salesData, saleItemsResponse] = await Promise.all([
         getProducts(),
-        getSaleItems(),
+        salesQuery,
+        supabase
+          .from("sale_items")
+          .select("sale_id,product_id,product_name,quantity,subtotal"),
       ]);
 
+      const filteredSales = (salesData.data || []) as Sale[];
+      const saleIds = new Set(filteredSales.map((sale) => sale.id));
+      const filteredSaleItems = (
+        (saleItemsResponse.data || []) as SaleItemSummary[]
+      ).filter((item) => saleIds.has(item.sale_id));
+
       setProducts(productData);
-      setSaleItems(salesData);
+      setSaleItems(filteredSaleItems);
     } catch (error) {
       alert(
         error instanceof Error
@@ -49,7 +96,7 @@ export default function OwnerInventoryPage() {
 
   useEffect(() => {
     void loadData();
-  }, []);
+  }, [period]);
 
   const selectedProduct = products.find(
     (product) => product.id === selectedProductId
@@ -191,13 +238,16 @@ export default function OwnerInventoryPage() {
         title="Inventory Command Center"
         description="Monitor stock value, low-stock alerts, fast movers, slow movers and product performance."
         actions={
-          <button
-            type="button"
-            onClick={() => setShowAddInventory(true)}
-            className="rounded-2xl bg-[#d08a35] px-6 py-4 font-bold text-black hover:bg-[#e9a34c]"
-          >
-            + Add Inventory
-          </button>
+          <div className="flex gap-3">
+            <DashboardPeriodSelect value={period} onChange={setPeriod} />
+            <button
+              type="button"
+              onClick={() => setShowAddInventory(true)}
+              className="rounded-2xl bg-[#d08a35] px-6 py-4 font-bold text-black hover:bg-[#e9a34c]"
+            >
+              + Add Inventory
+            </button>
+          </div>
         }
       />
 
