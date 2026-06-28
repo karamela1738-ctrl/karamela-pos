@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import {
   DashboardInsightsSection,
   DashboardListRow,
   DashboardMetricCard,
   DashboardPageHeader,
   DashboardPanel,
+  DashboardReportDateBanner,
   DashboardPeriodSelect,
 } from "@/components/dashboard/ui";
 import { logDashboardQuery } from "@/lib/services/dashboard";
@@ -17,8 +18,16 @@ import {
   type OwnerWasteRow,
 } from "@/lib/services/operations";
 import { subscribeDashboardRefresh } from "@/lib/utils/dashboard-refresh";
-import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { type DashboardPeriod } from "@/lib/utils/period";
+import {
+  formatBusinessDateRange,
+  formatCurrency,
+  formatDate,
+} from "@/lib/utils/format";
+import {
+  getDashboardPeriodLabel,
+  getDashboardPeriodSummary,
+  type DashboardPeriod,
+} from "@/lib/utils/period";
 
 export default function OwnerWastePage() {
   const [wasteLogs, setWasteLogs] = useState<OwnerWasteRow[]>([]);
@@ -66,15 +75,23 @@ export default function OwnerWastePage() {
     }
   }
 
-  useEffect(() => {
+  const runLoadData = useEffectEvent(() => {
     void loadData();
+  });
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      runLoadData();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [period]);
 
   useEffect(() => {
     return subscribeDashboardRefresh(() => {
-      void loadData();
+      runLoadData();
     });
-  }, [period]);
+  }, []);
   const filteredWaste = wasteLogs;
   const filteredSales = sales;
 
@@ -92,8 +109,15 @@ export default function OwnerWastePage() {
     (sum, sale) => sum + Number(sale.total_amount || 0),
     0
   );
+  const periodLabel = getDashboardPeriodLabel(period);
+  const periodSummary = getDashboardPeriodSummary(period);
+  const reportDateRange = formatBusinessDateRange(
+    periodSummary.startBusinessDate,
+    periodSummary.endBusinessDate
+  );
 
   const wasteRatio = totalSales > 0 ? (totalWasteValue / totalSales) * 100 : 0;
+  const wasteRatioDisplay = totalSales > 0 ? `${wasteRatio.toFixed(1)}%` : "N/A";
 
   const reasonBreakdown = useMemo(() => {
     const breakdown = new Map<
@@ -172,15 +196,19 @@ export default function OwnerWastePage() {
 
   const insights = [
     totalWasteValue > 0
-      ? `Waste value for this period is ${formatCurrency(totalWasteValue)}.`
-      : "No waste recorded for this period.",
-    wasteRatio > 5
-      ? `Waste ratio is ${wasteRatio.toFixed(1)}%, which is high.`
-      : wasteRatio > 2
-        ? `Waste ratio is ${wasteRatio.toFixed(1)}%. Monitor closely.`
-        : `Waste ratio is ${wasteRatio.toFixed(1)}%, which is healthy.`,
+      ? `Waste value for ${periodLabel} is ${formatCurrency(totalWasteValue)}.`
+      : `No waste recorded for ${periodLabel}.`,
+    totalSales <= 0
+      ? totalWasteValue > 0
+        ? `Waste was recorded for ${periodLabel}, but no sales were recorded, so the waste ratio is not available yet.`
+        : `No sales were recorded for ${periodLabel}, so the waste ratio is not available yet.`
+      : wasteRatio > 5
+        ? `Waste ratio is ${wasteRatio.toFixed(1)}%, which is high.`
+        : wasteRatio > 2
+          ? `Waste ratio is ${wasteRatio.toFixed(1)}%. Monitor closely.`
+          : `Waste ratio is ${wasteRatio.toFixed(1)}%, which is healthy.`,
     productWaste[0]
-      ? `${productWaste[0].product_name} has the highest waste value.`
+      ? `${productWaste[0].product_name} has the highest waste value for ${periodLabel}.`
       : "No product waste pattern detected yet.",
     theftAndUnknown.length > 0
       ? `${theftAndUnknown.length} theft or unknown loss entries need review.`
@@ -215,7 +243,7 @@ export default function OwnerWastePage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#080604] p-8 text-white">
+    <main className="dashboard-page-shell">
       {error && (
         <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-100">
           {error}
@@ -227,13 +255,13 @@ export default function OwnerWastePage() {
         title="Waste & Shrinkage Dashboard"
         description="Track losses, damaged stock, theft, unknown shrinkage and waste impact."
         actions={
-          <div className="flex gap-3">
+          <div className="flex w-full flex-col gap-3 sm:flex-row">
             <DashboardPeriodSelect value={period} onChange={setPeriod} />
 
             <button
               type="button"
               onClick={downloadCSV}
-              className="rounded-2xl bg-[#d08a35] px-5 py-3 font-bold text-black hover:bg-[#e9a34c]"
+              className="w-full rounded-2xl bg-[#d08a35] px-5 py-3 font-bold text-black hover:bg-[#e9a34c] sm:w-auto"
             >
               Export CSV
             </button>
@@ -241,7 +269,9 @@ export default function OwnerWastePage() {
         }
       />
 
-      <section className="mt-8 grid gap-5 md:grid-cols-4">
+      <DashboardReportDateBanner value={reportDateRange} />
+
+      <section className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <DashboardMetricCard
           title="Waste Value"
           value={formatCurrency(totalWasteValue)}
@@ -252,7 +282,7 @@ export default function OwnerWastePage() {
         />
         <DashboardMetricCard
           title="Waste Ratio"
-          value={`${wasteRatio.toFixed(1)}%`}
+          value={wasteRatioDisplay}
         />
         <DashboardMetricCard
           title="Theft / Unknown"
@@ -267,7 +297,7 @@ export default function OwnerWastePage() {
         />
       </div>
 
-      <section className="mt-8 grid gap-6 md:grid-cols-3">
+      <section className="mt-8 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
         <DashboardPanel title="Waste by Reason" contentClassName="mt-5 space-y-2">
           {reasonBreakdown.length === 0 ? (
             <p className="text-zinc-500">No waste data yet.</p>
@@ -318,14 +348,14 @@ export default function OwnerWastePage() {
         </DashboardPanel>
       </section>
 
-      <section className="mt-8 overflow-hidden rounded-[2rem] border border-white/10 bg-white/5">
+      <section className="dashboard-table-shell mt-8 rounded-[2rem] border border-white/10 bg-white/5">
         <div className="border-b border-white/10 p-5">
           <h2 className="text-2xl font-bold text-[#d08a35]">
             Recent Waste Entries
           </h2>
         </div>
 
-        <table className="w-full text-left text-sm">
+        <table className="dashboard-data-table w-full text-left text-sm">
           <thead className="bg-white/10 text-zinc-300">
             <tr>
               <th className="p-4">Product</th>

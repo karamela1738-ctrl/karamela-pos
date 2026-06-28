@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase/client";
+import { getStoredStaffSession } from "@/lib/services/auth";
 
 export type Product = {
   id: string;
@@ -54,36 +55,69 @@ export async function getSaleItems() {
 export async function addProduct(input: ProductInput) {
   const payload = normalizeProductInput(input);
 
-  const { data, error } = await supabase
-    .from("products")
-    .insert(payload)
-    .select("*")
-    .single();
+  const { data, error } = await supabase.rpc("create_product", {
+    p_product_name: payload.product_name,
+    p_brand: payload.brand,
+    p_category: payload.category,
+    p_barcode: payload.barcode,
+    p_stock_qty: payload.stock_qty,
+    p_reorder_level: payload.reorder_level,
+    p_cost_price: payload.cost_price,
+    p_selling_price: payload.selling_price,
+    p_session_token: getRequiredSessionToken(),
+  });
 
   if (error) throw new Error(error.message);
 
-  return data as Product;
+  return requireProductRecord(data, "create_product");
 }
 
 export async function updateProduct(productId: string, input: ProductInput) {
   const payload = normalizeProductInput(input);
 
-  const { data, error } = await supabase
-    .from("products")
-    .update(payload)
-    .eq("id", productId)
-    .select("*")
-    .single();
+  const { data, error } = await supabase.rpc("update_product", {
+    p_product_id: productId,
+    p_product_name: payload.product_name,
+    p_brand: payload.brand,
+    p_category: payload.category,
+    p_barcode: payload.barcode,
+    p_stock_qty: payload.stock_qty,
+    p_reorder_level: payload.reorder_level,
+    p_cost_price: payload.cost_price,
+    p_selling_price: payload.selling_price,
+    p_session_token: getRequiredSessionToken(),
+  });
 
   if (error) throw new Error(error.message);
 
-  return data as Product;
+  return requireProductRecord(data, "update_product");
 }
 
 export async function deleteProduct(productId: string) {
-  const { error } = await supabase.from("products").delete().eq("id", productId);
+  const { error } = await supabase.rpc("delete_product", {
+    p_product_id: productId,
+    p_session_token: getRequiredSessionToken(),
+  });
 
   if (error) throw new Error(error.message);
+}
+
+function getRequiredSessionToken() {
+  const session = getStoredStaffSession();
+
+  if (!session?.session_token) {
+    throw new Error("Staff session has expired. Please sign in again.");
+  }
+
+  return session.session_token;
+}
+
+function requireProductRecord(value: unknown, rpcName: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${rpcName} returned an invalid response.`);
+  }
+
+  return value as Product;
 }
 
 function normalizeProductInput(input: ProductInput) {

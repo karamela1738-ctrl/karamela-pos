@@ -33,7 +33,11 @@ export default function EndShiftPage() {
   }
 
   useEffect(() => {
-    void loadStatus();
+    const timeoutId = window.setTimeout(() => {
+      void loadStatus();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
   async function endShift() {
@@ -86,8 +90,8 @@ export default function EndShiftPage() {
   ];
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#080604] p-8 text-white">
-      <div className="w-full max-w-xl rounded-[2rem] border border-[#d08a35]/20 bg-white/5 p-10 backdrop-blur-xl">
+    <main className="dashboard-page-shell-centered">
+      <div className="modal-panel-scroll w-full max-w-xl rounded-[2rem] border border-[#d08a35]/20 bg-white/5 p-6 backdrop-blur-xl sm:p-10">
         <h1 className="text-4xl font-bold text-[#d08a35]">End Shift</h1>
 
         <p className="mt-4 text-zinc-400">

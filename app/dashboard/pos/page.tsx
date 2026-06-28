@@ -38,7 +38,11 @@ export default function POSPage() {
   }
 
   useEffect(() => {
-    void loadProducts();
+    const timeoutId = window.setTimeout(() => {
+      void loadProducts();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
   const filteredProducts = useMemo(
@@ -135,14 +139,15 @@ export default function POSPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#080604] p-6 text-white">
-      <div className="mb-6 flex items-center justify-between">
+    <main className="dashboard-page-shell">
+      <div className="dashboard-width">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-4xl font-bold text-[#d08a35]">Sales POS</h1>
+          <h1 className="text-3xl font-bold text-[#d08a35] sm:text-4xl">Sales POS</h1>
           <p className="text-zinc-400">Fast tablet sales screen</p>
         </div>
 
-        <div className="rounded-2xl border border-[#d08a35]/30 bg-white/5 px-5 py-3">
+        <div className="w-full rounded-2xl border border-[#d08a35]/30 bg-white/5 px-5 py-3 sm:w-auto">
           <p className="text-sm text-zinc-400">Total</p>
           <p className="text-3xl font-bold text-[#d08a35]">
             {formatCurrency(total)}
@@ -150,7 +155,7 @@ export default function POSPage() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_420px]">
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <section>
           <input
             placeholder="Search product or barcode..."
@@ -159,15 +164,15 @@ export default function POSPage() {
             className="mb-6 w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-4 outline-none"
           />
 
-          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
             {filteredProducts.map((product) => (
               <button
                 key={product.id}
                 type="button"
                 onClick={() => addToCart(product)}
-                className="rounded-3xl border border-white/10 bg-white/5 p-5 text-left transition hover:border-[#d08a35]/60 hover:bg-[#d08a35]/10"
+                className="rounded-3xl border border-white/10 bg-white/5 p-4 text-left transition hover:border-[#d08a35]/60 hover:bg-[#d08a35]/10 sm:p-5"
               >
-                <p className="text-lg font-bold">{product.product_name}</p>
+                <p className="text-base font-bold sm:text-lg">{product.product_name}</p>
                 <p className="mt-1 text-sm text-zinc-400">{product.brand}</p>
                 <p className="mt-4 text-xl font-bold text-[#d08a35]">
                   {formatCurrency(product.selling_price)}
@@ -180,7 +185,7 @@ export default function POSPage() {
           </div>
         </section>
 
-        <aside className="rounded-[2rem] border border-[#d08a35]/20 bg-white/5 p-5">
+        <aside className="order-first rounded-[2rem] border border-[#d08a35]/20 bg-white/5 p-5 xl:order-last xl:sticky xl:top-6">
           <h2 className="text-2xl font-bold text-[#d08a35]">Cart</h2>
 
           <div className="mt-5 space-y-3">
@@ -281,6 +286,7 @@ export default function POSPage() {
             </button>
           </div>
         </aside>
+      </div>
       </div>
     </main>
   );

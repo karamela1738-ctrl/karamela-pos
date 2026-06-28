@@ -43,7 +43,11 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#d08a35",
+  themeColor: "#080604",
+  colorScheme: "dark",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -56,7 +60,7 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-screen bg-[#080604] text-white">
+      <body className="min-h-screen bg-[#080604] text-white selection:bg-[#d08a35]/40 selection:text-white">
         {children}
       </body>
     </html>

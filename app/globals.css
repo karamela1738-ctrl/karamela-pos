@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #080604;
+  --foreground: #f5efe7;
 }
 
 @theme inline {
@@ -12,15 +12,64 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--background);
 }
 
 body {
+  min-height: 100dvh;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), "Segoe UI", Helvetica, Arial, sans-serif;
+  overscroll-behavior-y: none;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.dashboard-page-shell {
+  @apply min-h-screen bg-[#080604] px-4 text-white sm:px-6 lg:px-8;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem);
+}
+
+.dashboard-page-shell-centered {
+  @apply flex min-h-screen items-center justify-center bg-[#080604] px-4 text-white sm:px-6;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem);
+}
+
+.dashboard-width {
+  @apply mx-auto w-full max-w-7xl;
+}
+
+.dashboard-table-shell {
+  @apply overflow-x-auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.dashboard-data-table {
+  min-width: 42rem;
+}
+
+.modal-panel-scroll {
+  max-height: min(88dvh, 52rem);
+  overflow-y: auto;
+}
+
+.safe-fixed-top-left {
+  top: calc(env(safe-area-inset-top, 0px) + 0.75rem);
+  left: calc(env(safe-area-inset-left, 0px) + 0.75rem);
+}
+
+@media (max-width: 640px) {
+  .dashboard-data-table {
+    min-width: 38rem;
+  }
 }

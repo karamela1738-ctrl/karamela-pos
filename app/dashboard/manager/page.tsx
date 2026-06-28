@@ -28,7 +28,11 @@ export default function OwnerDashboard() {
   }
 
   useEffect(() => {
-    loadData();
+    const timeoutId = window.setTimeout(() => {
+      void loadData();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
   useEffect(() => {
@@ -75,18 +79,18 @@ export default function OwnerDashboard() {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#070503] text-white">
+    <main className="dashboard-page-shell overflow-hidden bg-[#070503]">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,#b56a1c_0%,transparent_32%),radial-gradient(circle_at_bottom_right,#3a1705_0%,transparent_38%)] opacity-70" />
 
-      <section className="relative mx-auto max-w-7xl px-6 py-8">
-        <div className="rounded-[2.5rem] border border-[#d08a35]/25 bg-white/5 p-8 shadow-2xl backdrop-blur-xl">
+      <section className="dashboard-width relative py-2 sm:py-4">
+        <div className="rounded-[2rem] border border-[#d08a35]/25 bg-white/5 p-6 shadow-2xl backdrop-blur-xl sm:rounded-[2.5rem] sm:p-8">
           <p className="text-sm uppercase tracking-[0.35em] text-[#d08a35]">
             Karamela Control Center
           </p>
 
           <div className="mt-4 flex flex-col justify-between gap-6 md:flex-row md:items-end">
             <div>
-              <h1 className="text-5xl font-black tracking-tight md:text-6xl">
+              <h1 className="text-4xl font-black tracking-tight sm:text-5xl md:text-6xl">
                 Owner Dashboard
               </h1>
               <p className="mt-3 max-w-2xl text-zinc-400">
@@ -95,8 +99,8 @@ export default function OwnerDashboard() {
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              <div className="rounded-3xl border border-white/10 bg-black/30 px-6 py-4">
+            <div className="flex w-full flex-col-reverse gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end md:w-auto">
+              <div className="rounded-3xl border border-white/10 bg-black/30 px-5 py-4 sm:px-6">
                 <p className="text-sm text-zinc-400">Today</p>
                 <p className="text-2xl font-bold text-[#d08a35]">
                   {snapshot?.business_date
@@ -116,7 +120,7 @@ export default function OwnerDashboard() {
           </div>
         </div>
 
-        <div className="mt-8 grid gap-5 md:grid-cols-4">
+        <div className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
           <DashboardMetricCard
             title="Today's Sales"
             value={formatCurrency(snapshot?.today_sales)}
@@ -152,7 +156,7 @@ export default function OwnerDashboard() {
           />
         </div>
 
-        <div className="mt-8 grid gap-6 md:grid-cols-3">
+        <div className="mt-8 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
           <DashboardActionCard
             title="Sales Reports"
             description="Daily, weekly and monthly sales performance with PDF reports."

@@ -62,7 +62,11 @@ export default function InventoryPage() {
   }
 
   useEffect(() => {
-    void loadProducts();
+    const timeoutId = window.setTimeout(() => {
+      void loadProducts();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
   const filteredProducts = useMemo(() => {
@@ -186,7 +190,7 @@ export default function InventoryPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#080604] p-8 text-white">
+    <main className="dashboard-page-shell">
       <DashboardPageHeader
         title="Product Management"
         description={
@@ -218,8 +222,8 @@ export default function InventoryPage() {
             )}
           </div>
 
-          <div className="mt-6 overflow-hidden rounded-3xl border border-white/10">
-            <table className="w-full text-left text-sm">
+          <div className="dashboard-table-shell mt-6 rounded-3xl border border-white/10">
+            <table className="dashboard-data-table w-full text-left text-sm">
               <thead className="bg-white/10 text-zinc-300">
                 <tr>
                   <th className="p-4">Product</th>

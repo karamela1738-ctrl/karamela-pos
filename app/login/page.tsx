@@ -77,23 +77,23 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#080604] px-4 text-white">
+    <main className="dashboard-page-shell-centered relative overflow-hidden">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,#9a5a18_0%,transparent_35%),radial-gradient(circle_at_bottom,#3a1d08_0%,transparent_40%)] opacity-60" />
 
-      <div className="relative w-full max-w-md rounded-[2rem] border border-[#c47a2c]/25 bg-white/5 p-8 shadow-2xl backdrop-blur-xl">
+      <div className="relative max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-[1.75rem] border border-[#c47a2c]/25 bg-white/5 p-5 shadow-2xl backdrop-blur-xl sm:rounded-[2rem] sm:p-8">
         <div className="flex flex-col items-center text-center">
-          <div className="mb-5 flex h-24 w-24 items-center justify-center rounded-full border border-[#c47a2c]/30 bg-[#130b05] shadow-[0_0_40px_rgba(196,122,44,0.25)]">
+          <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-full border border-[#c47a2c]/30 bg-[#130b05] shadow-[0_0_40px_rgba(196,122,44,0.25)] sm:h-24 sm:w-24">
             <Image
               src="/icons/karamela-icon.jpeg"
               alt="Karamela"
-              width={70}
-              height={70}
+              width={64}
+              height={64}
               className="rounded-full"
               priority
             />
           </div>
 
-          <h1 className="text-4xl font-semibold tracking-wide text-[#d08a35]">
+          <h1 className="text-3xl font-semibold tracking-wide text-[#d08a35] sm:text-4xl">
             Karamela
           </h1>
 
@@ -103,11 +103,11 @@ export default function LoginPage() {
         </div>
 
         <div className="mt-8">
-          <div className="mb-5 flex justify-center gap-3">
+          <div className="mb-5 flex justify-center gap-2.5 sm:gap-3">
             {PIN_DOTS.map((index) => (
               <div
                 key={index}
-                className={`h-4 w-4 rounded-full border border-[#c47a2c]/60 ${
+                className={`h-3.5 w-3.5 rounded-full border border-[#c47a2c]/60 sm:h-4 sm:w-4 ${
                   pin.length > index ? "bg-[#d08a35]" : "bg-transparent"
                 }`}
               />
@@ -120,14 +120,14 @@ export default function LoginPage() {
             </p>
           )}
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-3 gap-3 sm:gap-4">
             {PIN_DIGITS.map((num) => (
               <button
                 key={num}
                 type="button"
                 disabled={loading}
                 onClick={() => pressNumber(num)}
-                className="h-16 rounded-2xl border border-white/10 bg-white/5 text-2xl font-semibold text-white hover:bg-[#d08a35]/20 active:scale-95"
+                className="h-14 rounded-2xl border border-white/10 bg-white/5 text-xl font-semibold text-white hover:bg-[#d08a35]/20 active:scale-95 sm:h-16 sm:text-2xl"
               >
                 {num}
               </button>
@@ -137,7 +137,7 @@ export default function LoginPage() {
               type="button"
               onClick={clearPin}
               disabled={loading}
-              className="h-16 rounded-2xl border border-white/10 bg-white/5 text-sm font-semibold text-zinc-300 hover:bg-red-500/20"
+              className="h-14 rounded-2xl border border-white/10 bg-white/5 text-sm font-semibold text-zinc-300 hover:bg-red-500/20 sm:h-16"
             >
               Clear
             </button>
@@ -146,7 +146,7 @@ export default function LoginPage() {
               type="button"
               disabled={loading}
               onClick={() => pressNumber("0")}
-              className="h-16 rounded-2xl border border-white/10 bg-white/5 text-2xl font-semibold text-white hover:bg-[#d08a35]/20"
+              className="h-14 rounded-2xl border border-white/10 bg-white/5 text-xl font-semibold text-white hover:bg-[#d08a35]/20 sm:h-16 sm:text-2xl"
             >
               0
             </button>
@@ -155,7 +155,7 @@ export default function LoginPage() {
               type="button"
               disabled={loading}
               onClick={loginStaff}
-              className="h-16 rounded-2xl bg-[#d08a35] text-sm font-bold text-black hover:bg-[#e9a34c]"
+              className="h-14 rounded-2xl bg-[#d08a35] text-sm font-bold text-black hover:bg-[#e9a34c] sm:h-16"
             >
               {loading ? "..." : "Login"}
             </button>

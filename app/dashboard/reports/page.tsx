@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import {
   DashboardInsightsSection,
   DashboardMetricCard,
   DashboardPageHeader,
+  DashboardReportDateBanner,
   DashboardPeriodSelect,
 } from "@/components/dashboard/ui";
 import { logDashboardQuery } from "@/lib/services/dashboard";
@@ -19,8 +20,16 @@ import {
   type OwnerWasteRow,
 } from "@/lib/services/operations";
 import { subscribeDashboardRefresh } from "@/lib/utils/dashboard-refresh";
-import { formatCurrency } from "@/lib/utils/format";
-import { type DashboardPeriod } from "@/lib/utils/period";
+import {
+  formatBusinessDateRange,
+  formatCurrency,
+} from "@/lib/utils/format";
+import {
+  getDashboardPeriodHeading,
+  getDashboardPeriodLabel,
+  getDashboardPeriodSummary,
+  type DashboardPeriod,
+} from "@/lib/utils/period";
 
 export default function SalesReportsPage() {
   const [sales, setSales] = useState<OwnerSaleRow[]>([]);
@@ -79,20 +88,35 @@ export default function SalesReportsPage() {
     }
   }
 
-  useEffect(() => {
+  const runLoadReports = useEffectEvent(() => {
     void loadReports();
+  });
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      runLoadReports();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [period]);
 
   useEffect(() => {
     return subscribeDashboardRefresh(() => {
-      void loadReports();
+      runLoadReports();
     });
-  }, [period]);
+  }, []);
 
   const totalSales = sales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0);
 
   const transactions = sales.length;
   const averageSale = transactions > 0 ? totalSales / transactions : 0;
+  const periodLabel = getDashboardPeriodLabel(period);
+  const periodHeading = getDashboardPeriodHeading(period);
+  const periodSummary = getDashboardPeriodSummary(period);
+  const reportDateRange = formatBusinessDateRange(
+    periodSummary.startBusinessDate,
+    periodSummary.endBusinessDate
+  );
 
   const wasteValue = waste.reduce(
     (sum, log) => sum + Number(log.effective_value || 0),
@@ -142,17 +166,17 @@ export default function SalesReportsPage() {
 
   const insights = [
     totalSales > 0
-      ? `Today's sales are ${formatCurrency(totalSales)}.`
-      : "No sales have been recorded today yet.",
+      ? `Sales for ${periodLabel} are ${formatCurrency(totalSales)}.`
+      : `No sales have been recorded for ${periodLabel}.`,
     bestSeller
-      ? `${bestSeller.product_name} is the fastest moving product with ${bestSeller.quantity} units sold.`
-      : "No product movement yet.",
+      ? `${bestSeller.product_name} is the fastest moving product for ${periodLabel} with ${bestSeller.quantity} units sold.`
+      : `No product movement has been recorded for ${periodLabel}.`,
     wasteValue > 0
-      ? `Waste recorded today is ${formatCurrency(wasteValue)}. Monitor shrinkage closely.`
-      : "No waste recorded today. Good stock control so far.",
+      ? `Waste recorded for ${periodLabel} is ${formatCurrency(wasteValue)}. Monitor shrinkage closely.`
+      : `No waste recorded for ${periodLabel}. Good stock control so far.`,
     averageSale > 0
-      ? `Average transaction value is ${formatCurrency(Math.round(averageSale))}.`
-      : "Average transaction value will appear after sales are recorded.",
+      ? `Average transaction value for ${periodLabel} is ${formatCurrency(Math.round(averageSale))}.`
+      : `Average transaction value will appear after sales are recorded for ${periodLabel}.`,
   ];
 
   function downloadPDF() {
@@ -162,10 +186,11 @@ export default function SalesReportsPage() {
     doc.text("Karamela Sales Report", 14, 20);
 
     doc.setFontSize(10);
-    doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, 28);
+    doc.text(`Period: ${periodHeading}`, 14, 28);
+    doc.text(`Date Range: ${reportDateRange}`, 14, 34);
 
     autoTable(doc, {
-      startY: 36,
+      startY: 42,
       head: [["Metric", "Value"]],
       body: [
         ["Total Sales", formatCurrency(totalSales)],
@@ -199,14 +224,14 @@ export default function SalesReportsPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-[#080604] p-8 text-white">
+      <main className="dashboard-page-shell">
         Loading reports...
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[#080604] p-8 text-white">
+    <main className="dashboard-page-shell">
       {reportsError && (
         <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-100">
           {reportsError}
@@ -216,14 +241,14 @@ export default function SalesReportsPage() {
       <DashboardPageHeader
         title="Sales Reports"
         description="Daily sales, product performance, payments and business insights."
-        titleClassName="text-5xl font-bold text-[#d08a35]"
+        titleClassName="mt-2 text-3xl font-bold text-[#d08a35] sm:mt-3 sm:text-4xl lg:text-5xl"
         actions={
-          <div className="flex gap-3">
+          <div className="flex w-full flex-col gap-3 sm:flex-row">
             <DashboardPeriodSelect value={period} onChange={setPeriod} />
             <button
               type="button"
               onClick={downloadPDF}
-              className="rounded-2xl bg-[#d08a35] px-6 py-4 font-bold text-black hover:bg-[#e9a34c]"
+              className="w-full rounded-2xl bg-[#d08a35] px-6 py-4 font-bold text-black hover:bg-[#e9a34c] sm:w-auto"
             >
               Download PDF Report
             </button>
@@ -231,9 +256,11 @@ export default function SalesReportsPage() {
         }
       />
 
-      <section className="mt-8 grid gap-5 md:grid-cols-4">
+      <DashboardReportDateBanner value={reportDateRange} />
+
+      <section className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <DashboardMetricCard
-          title="Today's Sales"
+          title={`${periodHeading} Sales`}
           value={formatCurrency(totalSales)}
         />
         <DashboardMetricCard
@@ -250,7 +277,7 @@ export default function SalesReportsPage() {
         />
       </section>
 
-      <section className="mt-8 grid gap-6 md:grid-cols-3">
+      <section className="mt-8 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
         <DashboardMetricCard
           title="Cash Sales"
           value={formatCurrency(paymentTotals.cash || 0)}
@@ -278,14 +305,14 @@ export default function SalesReportsPage() {
         />
       </div>
 
-      <section className="mt-8 overflow-hidden rounded-[2rem] border border-white/10 bg-white/5">
+      <section className="dashboard-table-shell mt-8 rounded-[2rem] border border-white/10 bg-white/5">
         <div className="border-b border-white/10 p-5">
           <h2 className="text-2xl font-bold text-[#d08a35]">
             Product Performance
           </h2>
         </div>
 
-        <table className="w-full text-left text-sm">
+        <table className="dashboard-data-table w-full text-left text-sm">
           <thead className="bg-white/10 text-zinc-300">
             <tr>
               <th className="p-4">Product</th>

@@ -16,37 +16,44 @@ export default function DashboardLayout({
 }>) {
   const pathname = usePathname();
   const router = useRouter();
-  const [authorized, setAuthorized] = useState(false);
+  const [authorizedPath, setAuthorizedPath] = useState<string | null>(null);
+
+  const authorized = authorizedPath === pathname;
 
   useEffect(() => {
-    setAuthorized(false);
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const session = await validateStoredStaffSession();
 
-    async function checkAccess() {
-      try {
-        const session = await validateStoredStaffSession();
+          if (!session) {
+            router.replace("/login");
+            return;
+          }
 
-        if (!session) {
+          if (pathname === "/dashboard/admin") {
+            setAuthorizedPath(pathname);
+            return;
+          }
+
+          if (!canAccessDashboardPath(session.role, pathname)) {
+            router.replace(getDefaultDashboardPath(session.role));
+            return;
+          }
+
+          setAuthorizedPath(pathname);
+        } catch {
           router.replace("/login");
-          return;
         }
+      })();
+    }, 0);
 
-        if (!canAccessDashboardPath(session.role, pathname)) {
-          router.replace(getDefaultDashboardPath(session.role));
-          return;
-        }
-
-        setAuthorized(true);
-      } catch {
-        router.replace("/login");
-      }
-    }
-
-    void checkAccess();
+    return () => window.clearTimeout(timeoutId);
   }, [pathname, router]);
 
   if (!authorized) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#080604] p-8 text-zinc-300">
+      <main className="dashboard-page-shell-centered text-zinc-300">
         Checking access...
       </main>
     );
@@ -74,7 +81,7 @@ export default function DashboardLayout({
           type="button"
           onClick={goBack}
           aria-label="Go back"
-          className="fixed left-4 top-4 z-50 flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-black/60 text-2xl font-bold text-white shadow-xl backdrop-blur transition hover:bg-white/10 print:hidden"
+          className="safe-fixed-top-left fixed z-50 flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-black/60 text-xl font-bold text-white shadow-xl backdrop-blur transition hover:bg-white/10 print:hidden sm:h-12 sm:w-12 sm:text-2xl"
         >
           &larr;
         </button>

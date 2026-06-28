@@ -91,8 +91,11 @@ export default function WastePage() {
   }
 
   useEffect(() => {
-    void loadProducts();
-    void loadLogs();
+    const timeoutId = window.setTimeout(() => {
+      void Promise.all([loadProducts(), loadLogs()]);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
   const productMap = useMemo(
@@ -175,7 +178,7 @@ export default function WastePage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#080604] p-8 text-white">
+    <main className="dashboard-page-shell">
       <h1 className="text-4xl font-bold text-[#d08a35]">Waste Log</h1>
       <p className="mt-2 text-zinc-400">
         Record damaged, melted, expired, sampled, or missing stock.
@@ -240,8 +243,8 @@ export default function WastePage() {
         </button>
       </form>
 
-      <div className="mt-8 overflow-hidden rounded-[2rem] border border-white/10 bg-white/5">
-        <table className="w-full text-left text-sm">
+      <div className="dashboard-table-shell mt-8 rounded-[2rem] border border-white/10 bg-white/5">
+        <table className="dashboard-data-table w-full text-left text-sm">
           <thead className="bg-white/10 text-zinc-300">
             <tr>
               <th className="p-4">Product</th>

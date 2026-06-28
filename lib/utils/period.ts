@@ -14,6 +14,37 @@ export const DASHBOARD_PERIOD_OPTIONS: Array<{
   { label: "All Time", value: "all" },
 ];
 
+export function getDashboardPeriodLabel(period: DashboardPeriod) {
+  switch (period) {
+    case "today":
+      return "today";
+    case "7days":
+      return "the last 7 days";
+    case "30days":
+      return "the last 30 days";
+    case "all":
+      return "all time";
+  }
+}
+
+export function getDashboardPeriodHeading(period: DashboardPeriod) {
+  switch (period) {
+    case "today":
+      return "Today's";
+    case "7days":
+      return "Last 7 Days";
+    case "30days":
+      return "Last 30 Days";
+    case "all":
+      return "All-Time";
+  }
+}
+
+export type DashboardPeriodSummary = {
+  startBusinessDate: string | null;
+  endBusinessDate: string;
+};
+
 export type BusinessDateRange = {
   businessDate: string;
   start: string;
@@ -183,5 +214,33 @@ export function getPeriodDateRange(period: DashboardPeriod) {
   return {
     start: range.start,
     end: range.end,
+  };
+}
+
+export function getDashboardPeriodSummary(
+  period: DashboardPeriod,
+  date = new Date()
+): DashboardPeriodSummary {
+  const currentBusinessDate = getNairobiBusinessDate(date);
+
+  if (period === "all") {
+    return {
+      startBusinessDate: null,
+      endBusinessDate: currentBusinessDate,
+    };
+  }
+
+  const range = getPeriodBusinessDateRange(period, date);
+
+  if (!range) {
+    return {
+      startBusinessDate: null,
+      endBusinessDate: currentBusinessDate,
+    };
+  }
+
+  return {
+    startBusinessDate: range.startBusinessDate,
+    endBusinessDate: range.endBusinessDate,
   };
 }

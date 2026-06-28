@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import {
   DashboardMetricCard,
   DashboardPageHeader,
@@ -127,13 +127,21 @@ export default function ReconciliationPage() {
     }
   }
 
-  useEffect(() => {
+  const runLoadTodaySales = useEffectEvent(() => {
     void loadTodaySales();
+  });
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      runLoadTodaySales();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
   useEffect(() => {
     return subscribeDashboardRefresh(() => {
-      void loadTodaySales();
+      runLoadTodaySales();
     });
   }, []);
 
@@ -190,7 +198,7 @@ export default function ReconciliationPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#080604] p-8 text-white">
+    <main className="dashboard-page-shell">
       <DashboardPageHeader
         title="Payment Reconciliation"
         description={`Compare expected sales against cash, Mpesa and card payments received.${status?.business_date ? ` Business date: ${formatDate(status.business_date)}.` : ""}`}
@@ -209,7 +217,7 @@ export default function ReconciliationPage() {
         </div>
       )}
 
-      <section className="mt-8 grid gap-5 md:grid-cols-4">
+      <section className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <DashboardMetricCard
           title="Cash Expected"
           value={formatCurrency(sales.cash)}
@@ -228,7 +236,7 @@ export default function ReconciliationPage() {
         />
       </section>
 
-      <section className="mt-8 grid gap-6 rounded-[2rem] border border-[#c47a2c]/20 bg-white/5 p-6 md:grid-cols-3">
+      <section className="mt-8 grid gap-6 rounded-[2rem] border border-[#c47a2c]/20 bg-white/5 p-5 sm:p-6 md:grid-cols-3">
         {RECONCILIATION_FIELDS.map((field) => (
           <label key={field.key} className="block">
             <span className="text-sm text-zinc-400">{field.label}</span>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { formatCurrency, formatDateTime } from "@/lib/utils/format";
 import {
   readStoredReceipt,
@@ -8,23 +8,19 @@ import {
 } from "@/lib/utils/receipt";
 
 export default function ReceiptPage() {
-  const [receipt, setReceipt] = useState<ReceiptPayload | null>(null);
-
-  useEffect(() => {
-    setReceipt(readStoredReceipt());
-  }, []);
+  const [receipt] = useState<ReceiptPayload | null>(() => readStoredReceipt());
 
   if (!receipt) {
     return (
-      <main className="min-h-screen bg-[#080604] p-8 text-white">
+      <main className="dashboard-page-shell">
         No receipt found.
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[#080604] p-6 text-white">
-      <div className="mx-auto max-w-sm bg-white p-5 text-black print:shadow-none">
+    <main className="dashboard-page-shell">
+      <div className="mx-auto w-full max-w-sm rounded-[1.5rem] bg-white p-4 text-black shadow-2xl print:rounded-none print:shadow-none sm:p-5">
         <div className="text-center">
           <h1 className="text-xl font-bold">KARAMELA POS</h1>
           <p className="text-xs">Sales / Inventory / Reconciliation</p>
@@ -83,7 +79,7 @@ export default function ReceiptPage() {
         <button
           type="button"
           onClick={() => window.print()}
-          className="w-full rounded-xl bg-[#d08a35] py-3 font-bold text-black"
+          className="w-full rounded-xl bg-[#d08a35] py-3.5 font-bold text-black"
         >
           Print Receipt
         </button>

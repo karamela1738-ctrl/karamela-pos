@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import {
   DashboardInsightsSection,
   DashboardListRow,
   DashboardMetricCard,
   DashboardPageHeader,
   DashboardPanel,
+  DashboardReportDateBanner,
   DashboardPeriodSelect,
 } from "@/components/dashboard/ui";
 import {
@@ -18,9 +19,12 @@ import { supabase } from "@/lib/supabase/client";
 import { restockProductWorkflow } from "@/lib/services/workflows";
 import { formatCurrency } from "@/lib/utils/format";
 import {
+  getDashboardPeriodLabel,
+  getDashboardPeriodSummary,
   getPeriodDateRange,
   type DashboardPeriod,
 } from "@/lib/utils/period";
+import { formatBusinessDateRange } from "@/lib/utils/format";
 
 type Sale = {
   id: string;
@@ -94,8 +98,16 @@ export default function OwnerInventoryPage() {
     }
   }
 
-  useEffect(() => {
+  const runLoadData = useEffectEvent(() => {
     void loadData();
+  });
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      runLoadData();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [period]);
 
   const selectedProduct = products.find(
@@ -215,6 +227,12 @@ export default function OwnerInventoryPage() {
       .toLowerCase()
       .includes(search.toLowerCase())
   );
+  const periodLabel = getDashboardPeriodLabel(period);
+  const periodSummary = getDashboardPeriodSummary(period);
+  const reportDateRange = formatBusinessDateRange(
+    periodSummary.startBusinessDate,
+    periodSummary.endBusinessDate
+  );
 
   const insights = [
     outOfStock.length > 0
@@ -224,26 +242,26 @@ export default function OwnerInventoryPage() {
       ? `${lowStock.length} products are below reorder level.`
       : "Stock levels look healthy.",
     fastMovers[0]
-      ? `${fastMovers[0].product_name} is the fastest moving product.`
-      : "Fast movers will appear after sales are recorded.",
+      ? `${fastMovers[0].product_name} is the fastest moving product for ${periodLabel}.`
+      : `Fast movers will appear after sales are recorded for ${periodLabel}.`,
     inventoryValue > 0
       ? `Current inventory value is ${formatCurrency(inventoryValue)}.`
       : "Inventory value will appear after cost prices are added.",
   ];
 
   return (
-    <main className="min-h-screen bg-[#080604] p-8 text-white">
+    <main className="dashboard-page-shell">
       <DashboardPageHeader
         eyebrow="Owner Inventory"
         title="Inventory Command Center"
         description="Monitor stock value, low-stock alerts, fast movers, slow movers and product performance."
         actions={
-          <div className="flex gap-3">
+          <div className="flex w-full flex-col gap-3 sm:flex-row">
             <DashboardPeriodSelect value={period} onChange={setPeriod} />
             <button
               type="button"
               onClick={() => setShowAddInventory(true)}
-              className="rounded-2xl bg-[#d08a35] px-6 py-4 font-bold text-black hover:bg-[#e9a34c]"
+              className="w-full rounded-2xl bg-[#d08a35] px-6 py-4 font-bold text-black hover:bg-[#e9a34c] sm:w-auto"
             >
               + Add Inventory
             </button>
@@ -251,7 +269,9 @@ export default function OwnerInventoryPage() {
         }
       />
 
-      <section className="mt-8 grid gap-5 md:grid-cols-4">
+      <DashboardReportDateBanner value={reportDateRange} />
+
+      <section className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <DashboardMetricCard
           title="Total Products"
           value={products.length.toString()}
@@ -277,7 +297,7 @@ export default function OwnerInventoryPage() {
         />
       </div>
 
-      <section className="mt-8 grid gap-6 md:grid-cols-2">
+      <section className="mt-8 grid gap-6 lg:grid-cols-2">
         <DashboardPanel title="Fast Movers">
           {fastMovers.length === 0 ? (
             <p className="text-zinc-500">No sales recorded yet.</p>
@@ -315,8 +335,8 @@ export default function OwnerInventoryPage() {
         className="mt-8 w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-4 outline-none"
       />
 
-      <section className="mt-8 overflow-hidden rounded-[2rem] border border-white/10 bg-white/5">
-        <table className="w-full text-left text-sm">
+      <section className="dashboard-table-shell mt-8 rounded-[2rem] border border-white/10 bg-white/5">
+        <table className="dashboard-data-table w-full text-left text-sm">
           <thead className="bg-white/10 text-zinc-300">
             <tr>
               <th className="p-4">Product</th>
@@ -393,7 +413,7 @@ export default function OwnerInventoryPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <form
             onSubmit={addInventory}
-            className="w-full max-w-xl rounded-[2rem] border border-[#d08a35]/30 bg-[#100a05] p-6 shadow-2xl"
+            className="modal-panel-scroll w-full max-w-xl rounded-[2rem] border border-[#d08a35]/30 bg-[#100a05] p-5 shadow-2xl sm:p-6"
           >
             <h2 className="text-3xl font-bold text-[#d08a35]">
               Add Inventory

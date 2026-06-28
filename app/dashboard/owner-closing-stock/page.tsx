@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import {
   DashboardInsightsSection,
   DashboardListRow,
   DashboardMetricCard,
   DashboardPageHeader,
   DashboardPanel,
+  DashboardReportDateBanner,
   DashboardPeriodSelect,
 } from "@/components/dashboard/ui";
 import { logDashboardQuery } from "@/lib/services/dashboard";
@@ -15,8 +16,15 @@ import {
   type OwnerClosingStockRow,
 } from "@/lib/services/operations";
 import { subscribeDashboardRefresh } from "@/lib/utils/dashboard-refresh";
-import { formatCurrency } from "@/lib/utils/format";
-import { type DashboardPeriod } from "@/lib/utils/period";
+import {
+  formatBusinessDateRange,
+  formatCurrency,
+} from "@/lib/utils/format";
+import {
+  getDashboardPeriodLabel,
+  getDashboardPeriodSummary,
+  type DashboardPeriod,
+} from "@/lib/utils/period";
 
 export default function OwnerClosingStockPage() {
   const [counts, setCounts] = useState<OwnerClosingStockRow[]>([]);
@@ -52,28 +60,46 @@ export default function OwnerClosingStockPage() {
     }
   }
 
-  useEffect(() => {
+  const runLoadData = useEffectEvent(() => {
     void loadData();
+  });
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      runLoadData();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [period]);
 
   useEffect(() => {
     return subscribeDashboardRefresh(() => {
-      void loadData();
+      runLoadData();
     });
-  }, [period]);
+  }, []);
   const filteredCounts = counts;
 
+  const productMetaById = useMemo(() => {
+    const meta = new Map<string, { productName: string; sellingPrice: number }>();
+
+    filteredCounts.forEach((item) => {
+      if (!meta.has(item.product_id)) {
+        meta.set(item.product_id, {
+          productName: item.product_name || "Unknown Product",
+          sellingPrice: Number(item.selling_price || 0),
+        });
+      }
+    });
+
+    return meta;
+  }, [filteredCounts]);
+
   function getProductName(productId: string) {
-    return (
-      filteredCounts.find((item) => item.product_id === productId)?.product_name ||
-      "Unknown Product"
-    );
+    return productMetaById.get(productId)?.productName || "Unknown Product";
   }
 
   function getProductPrice(productId: string) {
-    return Number(
-      filteredCounts.find((item) => item.product_id === productId)?.selling_price || 0
-    );
+    return productMetaById.get(productId)?.sellingPrice || 0;
   }
 
   const varianceRows = filteredCounts.filter(
@@ -106,41 +132,54 @@ export default function OwnerClosingStockPage() {
   const matchedCount = filteredCounts.filter(
     (item) => Number(item.variance_quantity || 0) === 0
   ).length;
+  const periodLabel = getDashboardPeriodLabel(period);
+  const periodSummary = getDashboardPeriodSummary(period);
+  const reportDateRange = formatBusinessDateRange(
+    periodSummary.startBusinessDate,
+    periodSummary.endBusinessDate
+  );
 
-  const repeatedProblemProducts = useMemo(() => {
-    const occurrences = new Map<string, number>();
-
-    missingRows.forEach((item) => {
+  const repeatedProblemProducts = Array.from(
+    missingRows.reduce((occurrences, item) => {
       occurrences.set(
         item.product_id,
         (occurrences.get(item.product_id) || 0) + 1
       );
-    });
 
-    return Array.from(occurrences.entries())
-      .map(([productId, count]) => ({
-        product_id: productId,
-        product_name: getProductName(productId),
-        count,
-      }))
-      .filter((item) => item.count > 1)
-      .sort((a, b) => b.count - a.count);
-  }, [missingRows, filteredCounts]);
+      return occurrences;
+    }, new Map<string, number>())
+  )
+    .map(([productId, count]) => ({
+      product_id: productId,
+      product_name:
+        productMetaById.get(productId)?.productName || "Unknown Product",
+      count,
+    }))
+    .filter((item) => item.count > 1)
+    .sort((a, b) => b.count - a.count);
 
-  const insights = [
-    missingRows.length > 0
-      ? `${missingRows.length} products have missing stock.`
-      : "No missing stock detected.",
-    missingValue > 0
-      ? `Missing stock value is ${formatCurrency(missingValue)}.`
-      : "No stock loss value recorded.",
-    matchedCount > 0
-      ? `${matchedCount} products matched expected stock.`
-      : "No perfectly matched stock counts yet.",
-    repeatedProblemProducts.length > 0
-      ? `${repeatedProblemProducts[0].product_name} has repeated negative variance.`
-      : "No repeated problem product detected yet.",
-  ];
+  const insights =
+    filteredCounts.length === 0
+      ? [
+          `No closing stock records were found for ${periodLabel}.`,
+          "Variance value will appear after staff submit stock counts.",
+          "Matched product counts will appear after counting starts.",
+          "Repeated problem products will appear after multiple count cycles.",
+        ]
+      : [
+          missingRows.length > 0
+            ? `${missingRows.length} products have missing stock in ${periodLabel}.`
+            : `No missing stock detected in ${periodLabel}.`,
+          missingValue > 0
+            ? `Missing stock value is ${formatCurrency(missingValue)}.`
+            : "No stock loss value recorded.",
+          matchedCount > 0
+            ? `${matchedCount} products matched expected stock.`
+            : "No perfectly matched stock counts yet.",
+          repeatedProblemProducts.length > 0
+            ? `${repeatedProblemProducts[0].product_name} has repeated negative variance.`
+            : "No repeated problem product detected yet.",
+        ];
 
   function exportCSV() {
     const rows = [
@@ -184,7 +223,7 @@ export default function OwnerClosingStockPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#080604] p-8 text-white">
+    <main className="dashboard-page-shell">
       {error && (
         <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-100">
           {error}
@@ -196,13 +235,13 @@ export default function OwnerClosingStockPage() {
         title="Closing Stock Control"
         description="Review stock variances, missing stock, extra stock and shrinkage risk after daily closing counts."
         actions={
-          <div className="flex gap-3">
+          <div className="flex w-full flex-col gap-3 sm:flex-row">
             <DashboardPeriodSelect value={period} onChange={setPeriod} />
 
             <button
               type="button"
               onClick={exportCSV}
-              className="rounded-2xl bg-[#d08a35] px-5 py-3 font-bold text-black hover:bg-[#e9a34c]"
+              className="w-full rounded-2xl bg-[#d08a35] px-5 py-3 font-bold text-black hover:bg-[#e9a34c] sm:w-auto"
             >
               Export CSV
             </button>
@@ -210,7 +249,9 @@ export default function OwnerClosingStockPage() {
         }
       />
 
-      <section className="mt-8 grid gap-5 md:grid-cols-4">
+      <DashboardReportDateBanner value={reportDateRange} />
+
+      <section className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <DashboardMetricCard
           title="Products Counted"
           value={filteredCounts.length.toString()}
@@ -236,7 +277,7 @@ export default function OwnerClosingStockPage() {
         />
       </div>
 
-      <section className="mt-8 grid gap-6 md:grid-cols-2">
+      <section className="mt-8 grid gap-6 lg:grid-cols-2">
         <DashboardPanel title="Shrinkage Focus" contentClassName="mt-5 space-y-2">
           {missingRows.length === 0 ? (
             <p className="text-zinc-500">No missing stock detected.</p>
@@ -269,14 +310,14 @@ export default function OwnerClosingStockPage() {
         </DashboardPanel>
       </section>
 
-      <section className="mt-8 overflow-hidden rounded-[2rem] border border-white/10 bg-white/5">
+      <section className="dashboard-table-shell mt-8 rounded-[2rem] border border-white/10 bg-white/5">
         <div className="border-b border-white/10 p-5">
           <h2 className="text-2xl font-bold text-[#d08a35]">
             Closing Count Variance Table
           </h2>
         </div>
 
-        <table className="w-full text-left text-sm">
+        <table className="dashboard-data-table w-full text-left text-sm">
           <thead className="bg-white/10 text-zinc-300">
             <tr>
               <th className="p-4">Date</th>

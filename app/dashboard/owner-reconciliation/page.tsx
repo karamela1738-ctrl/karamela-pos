@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import {
   DashboardInsightsSection,
   DashboardMetricCard,
   DashboardPageHeader,
+  DashboardReportDateBanner,
   DashboardPeriodSelect,
 } from "@/components/dashboard/ui";
 import { logDashboardQuery } from "@/lib/services/dashboard";
@@ -15,8 +16,15 @@ import {
   type OwnerSaleRow,
 } from "@/lib/services/operations";
 import { subscribeDashboardRefresh } from "@/lib/utils/dashboard-refresh";
-import { formatCurrency } from "@/lib/utils/format";
-import { type DashboardPeriod } from "@/lib/utils/period";
+import {
+  formatBusinessDateRange,
+  formatCurrency,
+} from "@/lib/utils/format";
+import {
+  getDashboardPeriodLabel,
+  getDashboardPeriodSummary,
+  type DashboardPeriod,
+} from "@/lib/utils/period";
 
 export default function OwnerReconciliationPage() {
   const [sales, setSales] = useState<OwnerSaleRow[]>([]);
@@ -60,22 +68,38 @@ export default function OwnerReconciliationPage() {
     }
   }
 
-  useEffect(() => {
+  const runLoadData = useEffectEvent(() => {
     void loadData();
+  });
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      runLoadData();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [period]);
 
   useEffect(() => {
     return subscribeDashboardRefresh(() => {
-      void loadData();
+      runLoadData();
     });
-  }, [period]);
+  }, []);
 
   const filteredSales = sales;
   const filteredReconciliations = reconciliations;
+  const periodLabel = getDashboardPeriodLabel(period);
+  const periodSummary = getDashboardPeriodSummary(period);
+  const reportDateRange = formatBusinessDateRange(
+    periodSummary.startBusinessDate,
+    periodSummary.endBusinessDate
+  );
+  const hasSales = filteredSales.length > 0;
+  const hasReconciliations = filteredReconciliations.length > 0;
 
   const expectedByPayment = useMemo(
     () => {
-      if (filteredReconciliations.length > 0) {
+      if (hasReconciliations) {
         return filteredReconciliations.reduce(
           (totals, sale) => {
             totals.cash += Number(sale.cash_expected || 0);
@@ -101,7 +125,7 @@ export default function OwnerReconciliationPage() {
         { cash: 0, mpesa: 0, card: 0 }
       );
     },
-    [filteredReconciliations, filteredSales]
+    [filteredReconciliations, filteredSales, hasReconciliations]
   );
 
   const totalExpected =
@@ -117,14 +141,13 @@ export default function OwnerReconciliationPage() {
   }, 0);
 
   const totalVariance =
-    filteredReconciliations.length > 0
+    hasReconciliations
       ? filteredReconciliations.reduce(
           (sum, item) => sum + Number(item.variance || 0),
           0
         )
       : 0;
-  const unreconciled =
-    filteredSales.length > 0 && filteredReconciliations.length === 0;
+  const unreconciled = hasSales && !hasReconciliations;
 
   const cashShortage = filteredReconciliations.reduce((sum, item) => {
     const cashVariance =
@@ -142,19 +165,27 @@ export default function OwnerReconciliationPage() {
 
   const insights = [
     unreconciled
-      ? "Sales exist but payment reconciliation has not been completed."
-      : "Reconciliation records exist for this period.",
-    totalVariance < 0
-      ? `Total shortage detected: ${formatCurrency(Math.abs(totalVariance))}.`
-      : totalVariance > 0
-        ? `Excess payment recorded: ${formatCurrency(totalVariance)}.`
-        : "Payments match expected sales.",
-    cashShortage > 0
-      ? `Cash shortage detected: ${formatCurrency(cashShortage)}.`
-      : "No cash shortage detected.",
-    mpesaShortage > 0
-      ? `Mpesa shortage detected: ${formatCurrency(mpesaShortage)}.`
-      : "Mpesa payments look balanced.",
+      ? `Sales exist for ${periodLabel}, but payment reconciliation has not been completed.`
+      : hasReconciliations
+        ? `Reconciliation records exist for ${periodLabel}.`
+        : `No sales or reconciliation records were found for ${periodLabel}.`,
+    !hasReconciliations
+      ? "Variance will appear after reconciliation is saved."
+      : totalVariance < 0
+        ? `Total shortage detected: ${formatCurrency(Math.abs(totalVariance))}.`
+        : totalVariance > 0
+          ? `Excess payment recorded: ${formatCurrency(totalVariance)}.`
+          : "Payments match expected sales.",
+    !hasReconciliations
+      ? "Cash shortage cannot be confirmed before reconciliation is completed."
+      : cashShortage > 0
+        ? `Cash shortage detected: ${formatCurrency(cashShortage)}.`
+        : "No cash shortage detected.",
+    !hasReconciliations
+      ? "Mpesa balance cannot be confirmed before reconciliation is completed."
+      : mpesaShortage > 0
+        ? `Mpesa shortage detected: ${formatCurrency(mpesaShortage)}.`
+        : "Mpesa payments look balanced.",
   ];
 
   function exportCSV() {
@@ -196,7 +227,7 @@ export default function OwnerReconciliationPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#080604] p-8 text-white">
+    <main className="dashboard-page-shell">
       {error && (
         <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-100">
           {error}
@@ -208,13 +239,13 @@ export default function OwnerReconciliationPage() {
         title="Payment Control Dashboard"
         description="Review cash, Mpesa, card payments, shortages, excesses and daily reconciliation status."
         actions={
-          <div className="flex gap-3">
+          <div className="flex w-full flex-col gap-3 sm:flex-row">
             <DashboardPeriodSelect value={period} onChange={setPeriod} />
 
             <button
               type="button"
               onClick={exportCSV}
-              className="rounded-2xl bg-[#d08a35] px-5 py-3 font-bold text-black hover:bg-[#e9a34c]"
+              className="w-full rounded-2xl bg-[#d08a35] px-5 py-3 font-bold text-black hover:bg-[#e9a34c] sm:w-auto"
             >
               Export CSV
             </button>
@@ -222,7 +253,9 @@ export default function OwnerReconciliationPage() {
         }
       />
 
-      <section className="mt-8 grid gap-5 md:grid-cols-4">
+      <DashboardReportDateBanner value={reportDateRange} />
+
+      <section className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <DashboardMetricCard
           title="Expected Sales"
           value={formatCurrency(totalExpected)}
@@ -241,7 +274,7 @@ export default function OwnerReconciliationPage() {
         />
       </section>
 
-      <section className="mt-8 grid gap-5 md:grid-cols-3">
+      <section className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
         <DashboardMetricCard
           title="Cash Expected"
           value={formatCurrency(expectedByPayment.cash)}
@@ -269,14 +302,14 @@ export default function OwnerReconciliationPage() {
         />
       </div>
 
-      <section className="mt-8 overflow-hidden rounded-[2rem] border border-white/10 bg-white/5">
+      <section className="dashboard-table-shell mt-8 rounded-[2rem] border border-white/10 bg-white/5">
         <div className="border-b border-white/10 p-5">
           <h2 className="text-2xl font-bold text-[#d08a35]">
             Reconciliation History
           </h2>
         </div>
 
-        <table className="w-full text-left text-sm">
+        <table className="dashboard-data-table w-full text-left text-sm">
           <thead className="bg-white/10 text-zinc-300">
             <tr>
               <th className="p-4">Date</th>

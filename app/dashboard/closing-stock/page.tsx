@@ -32,10 +32,6 @@ export default function ClosingStockPage() {
     }
   }
 
-  useEffect(() => {
-    void Promise.all([loadProducts(), loadStatus()]);
-  }, []);
-
   async function loadStatus() {
     try {
       setStatus(await getBusinessDayStatus());
@@ -47,6 +43,14 @@ export default function ClosingStockPage() {
       );
     }
   }
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void Promise.all([loadProducts(), loadStatus()]);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, []);
 
   const filteredProducts = useMemo(
     () =>
@@ -135,7 +139,7 @@ export default function ClosingStockPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#080604] p-8 text-white">
+    <main className="dashboard-page-shell">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
           <h1 className="text-4xl font-bold text-[#d08a35]">
@@ -174,8 +178,8 @@ export default function ClosingStockPage() {
         className="mt-8 w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-4 outline-none"
       />
 
-      <div className="mt-8 overflow-hidden rounded-[2rem] border border-white/10 bg-white/5">
-        <table className="w-full text-left text-sm">
+      <div className="dashboard-table-shell mt-8 rounded-[2rem] border border-white/10 bg-white/5">
+        <table className="dashboard-data-table w-full text-left text-sm">
           <thead className="bg-white/10 text-zinc-300">
             <tr>
               <th className="p-4">Product</th>

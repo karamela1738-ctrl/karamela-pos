@@ -30,7 +30,11 @@ export default function StaffActivityPage() {
   }
 
   useEffect(() => {
-    void loadActivity();
+    const timeoutId = window.setTimeout(() => {
+      void loadActivity();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
   const filteredActivities = useMemo(
@@ -70,7 +74,7 @@ export default function StaffActivityPage() {
   ];
 
   return (
-    <main className="min-h-screen bg-[#080604] p-8 text-white">
+    <main className="dashboard-page-shell">
       <DashboardPageHeader
         eyebrow="Owner Monitoring"
         title="Staff Activity"
@@ -78,7 +82,7 @@ export default function StaffActivityPage() {
         actions={<DashboardPeriodSelect value={period} onChange={setPeriod} />}
       />
 
-      <section className="mt-8 grid gap-5 md:grid-cols-4">
+      <section className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <DashboardMetricCard title="Sales Actions" value={salesCount.toString()} />
         <DashboardMetricCard title="Waste Entries" value={wasteCount.toString()} />
         <DashboardMetricCard title="Closing Counts" value={closingCount.toString()} />
@@ -92,14 +96,14 @@ export default function StaffActivityPage() {
         <DashboardInsightsSection title="Activity Insights" insights={insights} />
       </div>
 
-      <section className="mt-8 overflow-hidden rounded-[2rem] border border-white/10 bg-white/5">
+      <section className="dashboard-table-shell mt-8 rounded-[2rem] border border-white/10 bg-white/5">
         <div className="border-b border-white/10 p-5">
           <h2 className="text-2xl font-bold text-[#d08a35]">
             Activity Timeline
           </h2>
         </div>
 
-        <table className="w-full text-left text-sm">
+        <table className="dashboard-data-table w-full text-left text-sm">
           <thead className="bg-white/10 text-zinc-300">
             <tr>
               <th className="p-4">Time</th>

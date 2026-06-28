@@ -149,6 +149,10 @@ export async function logoutStaffSession() {
 }
 
 export function getDefaultDashboardPath(role: StaffRole) {
+  if (role === "admin") {
+    return "/dashboard/admin";
+  }
+
   return role === "staff" || role === "cashier"
     ? "/dashboard/staff"
     : "/dashboard/manager";
@@ -158,7 +162,11 @@ export function canAccessDashboardPath(
   role: StaffRole,
   pathname: string
 ) {
-  if (role === "admin" || role === "owner" || role === "manager") {
+  if (role === "admin") {
+    return pathname === "/dashboard/admin";
+  }
+
+  if (role === "owner" || role === "manager") {
     return true;
   }
 
