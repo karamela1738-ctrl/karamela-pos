@@ -15,25 +15,17 @@ import {
   type Product,
 } from "@/lib/services/inventory";
 import { getMainStall } from "@/lib/services/stalls";
-import { supabase } from "@/lib/supabase/client";
+import { getOwnerSaleItemRows } from "@/lib/services/operations";
 import { restockProductWorkflow } from "@/lib/services/workflows";
 import { formatCurrency } from "@/lib/utils/format";
 import {
   getDashboardPeriodLabel,
   getDashboardPeriodSummary,
-  getPeriodDateRange,
   type DashboardPeriod,
 } from "@/lib/utils/period";
 import { formatBusinessDateRange } from "@/lib/utils/format";
 
-type Sale = {
-  id: string;
-  created_at: string;
-};
-
 type SaleItemSummary = {
-  sale_id: string;
-  product_id: string | null;
   product_name: string;
   quantity: number;
   subtotal: number;
@@ -53,42 +45,19 @@ export default function OwnerInventoryPage() {
 
   async function loadData() {
     try {
-      const stall = await getMainStall();
-
-      if (!stall) {
-        throw new Error("Could not find stall");
-      }
-
-      const dateRange = getPeriodDateRange(period);
-
-      let salesQuery = supabase
-        .from("sales")
-        .select("id,created_at")
-        .eq("stall_id", stall.id)
-        .order("created_at", { ascending: false });
-
-      if (dateRange) {
-        salesQuery = salesQuery
-          .gte("created_at", dateRange.start)
-          .lte("created_at", dateRange.end);
-      }
-
-      const [productData, salesData, saleItemsResponse] = await Promise.all([
+      const [productData, saleItemRows] = await Promise.all([
         getProducts(),
-        salesQuery,
-        supabase
-          .from("sale_items")
-          .select("sale_id,product_id,product_name,quantity,subtotal"),
+        getOwnerSaleItemRows(period),
       ]);
 
-      const filteredSales = (salesData.data || []) as Sale[];
-      const saleIds = new Set(filteredSales.map((sale) => sale.id));
-      const filteredSaleItems = (
-        (saleItemsResponse.data || []) as SaleItemSummary[]
-      ).filter((item) => saleIds.has(item.sale_id));
-
       setProducts(productData);
-      setSaleItems(filteredSaleItems);
+      setSaleItems(
+        saleItemRows.map((item) => ({
+          product_name: item.product_name,
+          quantity: item.quantity,
+          subtotal: item.subtotal,
+        }))
+      );
     } catch (error) {
       alert(
         error instanceof Error
@@ -194,7 +163,7 @@ export default function OwnerInventoryPage() {
     >();
 
     saleItems.forEach((item) => {
-      const key = item.product_id || item.product_name;
+      const key = item.product_name;
       const existing = salesMap.get(key);
 
       if (existing) {

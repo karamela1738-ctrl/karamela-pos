@@ -107,6 +107,27 @@ export type OwnerReconciliationRow = {
   created_at: string;
 };
 
+export type RecentWasteLogRow = {
+  id: string;
+  product_id: string;
+  quantity: number;
+  reason: string;
+  value_amount: number | null;
+  notes: string | null;
+  created_at: string;
+};
+
+export type ReconciliationSalesSummary = {
+  stall_id: string;
+  business_date: string;
+  cash: number;
+  mpesa: number;
+  card: number;
+  row_count: number;
+  start_at: string;
+  end_at: string;
+};
+
 function getRequiredSessionToken() {
   const session = getStoredStaffSession();
 
@@ -291,6 +312,60 @@ export async function getOwnerSaleItemRows(period: DashboardPeriod) {
     created_at: readString(item.created_at),
     business_date: readString(item.business_date),
   })) satisfies OwnerSaleItemRow[];
+}
+
+export async function getRecentWasteLogs(stallId: string, limit = 20) {
+  const sessionToken = getRequiredSessionToken();
+  const { data, error } = await supabase.rpc("get_recent_waste_logs", {
+    p_stall_id: stallId,
+    p_session_token: sessionToken,
+    p_limit: limit,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return requireResultArray(data, "get_recent_waste_logs").map((item) => ({
+    id: readString(item.id),
+    product_id: readString(item.product_id),
+    quantity: readNumber(item.quantity),
+    reason: readString(item.reason, "other"),
+    value_amount:
+      item.value_amount === null || item.value_amount === undefined
+        ? null
+        : readNumber(item.value_amount),
+    notes:
+      typeof item.notes === "string" && item.notes.trim() ? item.notes : null,
+    created_at: readString(item.created_at),
+  })) satisfies RecentWasteLogRow[];
+}
+
+export async function getReconciliationSalesSummary() {
+  const sessionToken = getRequiredSessionToken();
+  const { data, error } = await supabase.rpc(
+    "get_reconciliation_sales_summary",
+    {
+      p_session_token: sessionToken,
+    }
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const result = requireResultObject(data, "get_reconciliation_sales_summary");
+
+  return {
+    stall_id: readString(result.stall_id),
+    business_date: readString(result.business_date),
+    cash: readNumber(result.cash),
+    mpesa: readNumber(result.mpesa),
+    card: readNumber(result.card),
+    row_count: readNumber(result.row_count),
+    start_at: readString(result.start_at),
+    end_at: readString(result.end_at),
+  } satisfies ReconciliationSalesSummary;
 }
 
 export async function getOwnerClosingStockRows(period: DashboardPeriod) {

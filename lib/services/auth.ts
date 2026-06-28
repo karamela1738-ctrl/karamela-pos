@@ -20,7 +20,6 @@ export type StaffSession = {
 };
 
 type StaffRecord = Partial<StaffSession> & {
-  pin_code?: string;
   role?: string;
 };
 
@@ -56,8 +55,9 @@ export function persistStaffSession(session: StaffSession) {
     return;
   }
 
-  window.localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session));
-  window.localStorage.setItem(LEGACY_STAFF_KEY, JSON.stringify(session));
+  window.sessionStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session));
+  window.localStorage.removeItem(STAFF_SESSION_KEY);
+  window.localStorage.removeItem(LEGACY_STAFF_KEY);
 }
 
 export function getStoredStaffSession() {
@@ -66,6 +66,7 @@ export function getStoredStaffSession() {
   }
 
   const rawSession =
+    window.sessionStorage.getItem(STAFF_SESSION_KEY) ||
     window.localStorage.getItem(STAFF_SESSION_KEY) ||
     window.localStorage.getItem(LEGACY_STAFF_KEY);
 
@@ -82,7 +83,7 @@ export function getStoredStaffSession() {
       return null;
     }
 
-    if (!window.localStorage.getItem(STAFF_SESSION_KEY)) {
+    if (!window.sessionStorage.getItem(STAFF_SESSION_KEY)) {
       persistStaffSession(session);
     }
 
@@ -100,6 +101,7 @@ export function clearStoredStaffSession() {
 
   window.localStorage.removeItem(STAFF_SESSION_KEY);
   window.localStorage.removeItem(LEGACY_STAFF_KEY);
+  window.sessionStorage.removeItem(STAFF_SESSION_KEY);
 }
 
 export async function validateStoredStaffSession() {

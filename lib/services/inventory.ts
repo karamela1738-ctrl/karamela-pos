@@ -24,13 +24,6 @@ export type ProductInput = {
   selling_price?: number | null;
 };
 
-export type SaleItemSummary = {
-  product_id: string | null;
-  product_name: string;
-  quantity: number;
-  subtotal: number;
-};
-
 export async function getProducts() {
   const { data, error } = await supabase
     .from("products")
@@ -40,16 +33,6 @@ export async function getProducts() {
   if (error) throw new Error(error.message);
 
   return (data || []) as Product[];
-}
-
-export async function getSaleItems() {
-  const { data, error } = await supabase
-    .from("sale_items")
-    .select("product_id, product_name, quantity, subtotal");
-
-  if (error) throw new Error(error.message);
-
-  return (data || []) as SaleItemSummary[];
 }
 
 export async function addProduct(input: ProductInput) {

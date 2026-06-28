@@ -1,4 +1,3 @@
-revoke insert, delete on table public.licenses from anon, authenticated;
-grant select, update on table public.licenses to anon, authenticated;
+revoke all on table public.licenses from anon, authenticated;
 
 notify pgrst, 'reload schema';

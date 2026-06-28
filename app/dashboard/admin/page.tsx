@@ -7,13 +7,11 @@ import {
   DashboardPanel,
 } from "@/components/dashboard/ui";
 import {
+  getStoredStaffSession,
   validateStoredStaffSession,
   type StaffRole,
   type StaffSession,
 } from "@/lib/services/auth";
-import { getProducts } from "@/lib/services/inventory";
-import { getOwnerDashboardSnapshot } from "@/lib/services/operations";
-import { getMainStall } from "@/lib/services/stalls";
 import { supabase } from "@/lib/supabase/client";
 import { subscribeDashboardRefresh } from "@/lib/utils/dashboard-refresh";
 import {
@@ -37,6 +35,19 @@ type AdminStaffRow = {
   role: StaffRole;
   active: boolean;
   stall_id: string | null;
+};
+
+type AdminSessionRow = {
+  id: string;
+  staff_id: string;
+  staff_name: string;
+  role: StaffRole;
+  device_label: string;
+  user_agent: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  is_current: boolean;
 };
 
 type LicenseInfo = {
@@ -78,6 +89,15 @@ type StaffFormState = {
 
 type ConnectionStatus = "connected" | "error" | "checking";
 type AdminEditableRole = "admin" | "owner" | "staff";
+
+type AdminControlCenterSnapshot = {
+  stall_id: string;
+  business_setup: AdminBusinessSetup;
+  staff_rows: AdminStaffRow[];
+  session_rows: AdminSessionRow[];
+  license: LicenseInfo | null;
+  overview: Omit<SystemOverview, "appVersion">;
+};
 
 const ROLE_OPTIONS: AdminEditableRole[] = ["admin", "owner", "staff"];
 const EMPTY_BUSINESS_FORM: BusinessSetupForm = {
@@ -128,6 +148,7 @@ export default function AdminControlCenterPage() {
   const [businessForm, setBusinessForm] =
     useState<BusinessSetupForm>(EMPTY_BUSINESS_FORM);
   const [staffRows, setStaffRows] = useState<AdminStaffRow[]>([]);
+  const [sessionRows, setSessionRows] = useState<AdminSessionRow[]>([]);
   const [license, setLicense] = useState<LicenseInfo | null>(null);
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [staffForm, setStaffForm] = useState<StaffFormState>(EMPTY_STAFF_FORM);
@@ -135,6 +156,7 @@ export default function AdminControlCenterPage() {
   const [savingBusiness, setSavingBusiness] = useState(false);
   const [savingStaff, setSavingStaff] = useState(false);
   const [exportingTable, setExportingTable] = useState<string | null>(null);
+  const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
 
   const isAdmin = session?.role === "admin";
   const selectedStaff = useMemo(
@@ -151,28 +173,16 @@ export default function AdminControlCenterPage() {
     setLoading(true);
 
     try {
-      const stall = await getMainStall();
-      const [products, snapshot, setup, staff, licenseInfo, latestSaleTime] =
-        await Promise.all([
-          getProducts(),
-          getOwnerDashboardSnapshot(),
-          fetchBusinessSetup(stall.id),
-          fetchStaffRows(stall.id),
-          fetchLicenseInfo(),
-          fetchLastSaleTime(stall.id),
-        ]);
+      const snapshot = await fetchAdminControlCenterSnapshot();
 
-      setStallId(stall.id);
-      setBusinessSetup(setup);
-      setBusinessForm(toBusinessForm(setup));
-      setStaffRows(staff);
-      setLicense(licenseInfo);
+      setStallId(snapshot.stall_id);
+      setBusinessSetup(snapshot.business_setup);
+      setBusinessForm(toBusinessForm(snapshot.business_setup));
+      setStaffRows(snapshot.staff_rows);
+      setSessionRows(snapshot.session_rows);
+      setLicense(snapshot.license);
       setOverview({
-        totalProducts: products.length,
-        totalStaff: staff.length,
-        salesToday: snapshot.today_sales,
-        wasteToday: snapshot.today_waste,
-        lastSaleTime: latestSaleTime,
+        ...snapshot.overview,
         appVersion: APP_VERSION,
       });
       setConnectionStatus("connected");
@@ -256,23 +266,15 @@ export default function AdminControlCenterPage() {
 
     try {
       const payload = normalizeBusinessForm(businessForm);
-      const nowIso = new Date().toISOString();
 
-      const { error: updateError } = await supabase
-        .from("stalls")
-        .update({
-          name: payload.stall_name,
-          business_name: payload.business_name,
-          owner_name: payload.owner_name,
-          contact_phone: payload.contact_phone,
-          receipt_footer: payload.receipt_footer,
-          updated_at: nowIso,
-        })
-        .eq("id", businessSetup.stall_id);
-
-      if (updateError) {
-        throw new Error(updateError.message);
-      }
+      await callAdminRpc("save_admin_business_setup", {
+        p_session_token: getRequiredSessionToken(),
+        p_business_name: payload.business_name,
+        p_stall_name: payload.stall_name,
+        p_owner_name: payload.owner_name || null,
+        p_contact_phone: payload.contact_phone || null,
+        p_receipt_footer: payload.receipt_footer || null,
+      });
 
       const updatedSetup: AdminBusinessSetup = {
         stall_id: businessSetup.stall_id,
@@ -281,7 +283,6 @@ export default function AdminControlCenterPage() {
 
       setBusinessSetup(updatedSetup);
       setBusinessForm(toBusinessForm(updatedSetup));
-      await refreshLicenseBusinessName(payload.business_name);
       alert("Business setup saved successfully");
       await loadAdminData();
     } catch (saveError) {
@@ -309,34 +310,25 @@ export default function AdminControlCenterPage() {
       const payload = normalizeStaffForm(staffForm);
 
       if (selectedStaffId) {
-        const { error: updateError } = await supabase
-          .from("staff")
-          .update({
-            full_name: payload.full_name,
-            role: payload.role,
-            active: payload.active,
-            stall_id: stallId,
-          })
-          .eq("id", selectedStaffId);
-
-        if (updateError) {
-          throw new Error(updateError.message);
-        }
+        await callAdminRpc("update_admin_staff", {
+          p_session_token: getRequiredSessionToken(),
+          p_staff_id: selectedStaffId,
+          p_full_name: payload.full_name,
+          p_role: payload.role,
+          p_active: payload.active,
+        });
 
         alert("Staff updated successfully");
       } else {
         const pinCode = requirePinCode(staffForm.pin_code);
-        const { error: insertError } = await supabase.from("staff").insert({
-          full_name: payload.full_name,
-          role: payload.role,
-          active: payload.active,
-          stall_id: stallId,
-          pin_code: pinCode,
-        });
 
-        if (insertError) {
-          throw new Error(insertError.message);
-        }
+        await callAdminRpc("create_admin_staff", {
+          p_session_token: getRequiredSessionToken(),
+          p_full_name: payload.full_name,
+          p_role: payload.role,
+          p_pin_code: pinCode,
+          p_active: payload.active,
+        });
 
         alert("Staff added successfully");
       }
@@ -364,17 +356,16 @@ export default function AdminControlCenterPage() {
 
     try {
       const nextPinCode = requirePinCode(staffPinReset);
-      const { error: updateError } = await supabase
-        .from("staff")
-        .update({ pin_code: nextPinCode })
-        .eq("id", selectedStaffId);
 
-      if (updateError) {
-        throw new Error(updateError.message);
-      }
+      await callAdminRpc("reset_admin_staff_pin", {
+        p_session_token: getRequiredSessionToken(),
+        p_staff_id: selectedStaffId,
+        p_pin_code: nextPinCode,
+      });
 
       setStaffPinReset("");
       alert("PIN reset successfully");
+      await loadAdminData();
     } catch (resetError) {
       alert(
         resetError instanceof Error
@@ -383,6 +374,40 @@ export default function AdminControlCenterPage() {
       );
     } finally {
       setSavingStaff(false);
+    }
+  }
+
+  async function revokeDeviceSession(sessionRow: AdminSessionRow) {
+    if (sessionRow.is_current) {
+      alert("Use logout to end your current admin session.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Revoke ${sessionRow.staff_name}'s session on ${sessionRow.device_label}?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setRevokingSessionId(sessionRow.id);
+
+    try {
+      await callAdminRpc("revoke_admin_staff_session", {
+        p_session_token: getRequiredSessionToken(),
+        p_session_id: sessionRow.id,
+      });
+
+      await loadAdminData();
+    } catch (revokeError) {
+      alert(
+        revokeError instanceof Error
+          ? revokeError.message
+          : "Unable to revoke that session right now."
+      );
+    } finally {
+      setRevokingSessionId(null);
     }
   }
 
@@ -624,6 +649,10 @@ export default function AdminControlCenterPage() {
               />
               <AdminInfoRow label="Active staff" value={String(activeStaffCount)} />
               <AdminInfoRow label="Inactive staff" value={String(inactiveStaffCount)} />
+              <AdminInfoRow
+                label="Active device sessions"
+                value={String(sessionRows.length)}
+              />
             </DashboardPanel>
           </div>
         </div>
@@ -826,6 +855,83 @@ export default function AdminControlCenterPage() {
         </div>
 
         <section className="mt-8">
+          <DashboardPanel title="Device Sessions" contentClassName="mt-6">
+            <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-zinc-300">
+              Sessions now expire after 4 hours, rotate on validation, and can be revoked here if a device is lost or suspicious.
+            </div>
+
+            <div className="dashboard-table-shell mt-6 rounded-3xl border border-white/10">
+              <table className="dashboard-data-table w-full text-left text-sm">
+                <thead className="bg-white/10 text-zinc-300">
+                  <tr>
+                    <th className="p-4">Staff</th>
+                    <th className="p-4">Device</th>
+                    <th className="p-4">Last Seen</th>
+                    <th className="p-4">Expires</th>
+                    <th className="p-4">Action</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {sessionRows.map((sessionRow) => (
+                    <tr key={sessionRow.id} className="border-t border-white/10">
+                      <td className="p-4">
+                        <div className="font-medium">{sessionRow.staff_name}</div>
+                        <div className="mt-1 text-xs uppercase text-[#d08a35]">
+                          {sessionRow.role}
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div>{sessionRow.device_label}</div>
+                        <div className="mt-1 max-w-xs truncate text-xs text-zinc-500">
+                          {sessionRow.user_agent}
+                        </div>
+                      </td>
+                      <td className="p-4">{formatDateTime(sessionRow.last_seen_at)}</td>
+                      <td className="p-4">{formatDateTime(sessionRow.expires_at)}</td>
+                      <td className="p-4">
+                        {sessionRow.is_current ? (
+                          <span className="rounded-full bg-[#d08a35]/20 px-3 py-1 text-xs font-bold text-[#d08a35]">
+                            Current device
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void revokeDeviceSession(sessionRow)}
+                            disabled={revokingSessionId === sessionRow.id}
+                            className="rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200 hover:bg-red-500/20 disabled:opacity-60"
+                          >
+                            {revokingSessionId === sessionRow.id
+                              ? "Revoking..."
+                              : "Revoke"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+
+                  {!loading && sessionRows.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="p-6 text-center text-zinc-500">
+                        No active device sessions found.
+                      </td>
+                    </tr>
+                  )}
+
+                  {loading && (
+                    <tr>
+                      <td colSpan={5} className="p-6 text-center text-zinc-500">
+                        Loading device sessions...
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </DashboardPanel>
+        </section>
+
+        <section className="mt-8">
           <h2 className="text-2xl font-bold text-[#d08a35]">Backup Export</h2>
           <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {BACKUP_EXPORTS.map((backup) => (
@@ -883,165 +989,138 @@ function AdminInfoRow({
   );
 }
 
-async function fetchBusinessSetup(stallId: string): Promise<AdminBusinessSetup> {
-  const { data, error } = await supabase
-    .from("stalls")
-    .select("id, name, business_name, owner_name, contact_phone, receipt_footer")
-    .eq("id", stallId)
-    .limit(1);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  const stall = data?.[0];
-
-  if (!stall) {
-    throw new Error("Business setup could not be found.");
-  }
+async function fetchAdminControlCenterSnapshot(): Promise<AdminControlCenterSnapshot> {
+  const data = await callAdminRpc("get_admin_control_center", {
+    p_session_token: getRequiredSessionToken(),
+  });
+  const snapshot = requireRecord(data, "get_admin_control_center");
+  const overview = requireRecord(snapshot.overview, "get_admin_control_center.overview");
 
   return {
-    stall_id: stall.id,
-    business_name: normalizeNullableString(stall.business_name) || stall.name || "",
-    stall_name: normalizeNullableString(stall.name) || "Main Stall",
-    owner_name: normalizeNullableString(stall.owner_name) || "",
-    contact_phone: normalizeNullableString(stall.contact_phone) || "",
-    receipt_footer:
-      normalizeNullableString(stall.receipt_footer) ||
-      "Thank you for shopping with us.",
+    stall_id: readString(snapshot.stall_id),
+    business_setup: normalizeBusinessSetup(
+      requireRecord(
+        snapshot.business_setup,
+        "get_admin_control_center.business_setup"
+      )
+    ),
+    staff_rows: readArray(snapshot.staff_rows).map(normalizeAdminStaffRow),
+    session_rows: readArray(snapshot.session_rows).map(normalizeAdminSessionRow),
+    license: snapshot.license
+      ? normalizeLicenseInfo(
+          requireRecord(snapshot.license, "get_admin_control_center.license")
+        )
+      : null,
+    overview: {
+      totalProducts: readNumber(overview.total_products),
+      totalStaff: readNumber(overview.total_staff),
+      salesToday: readNumber(overview.sales_today),
+      wasteToday: readNumber(overview.waste_today),
+      lastSaleTime: normalizeNullableString(overview.last_sale_time),
+    },
   };
-}
-
-async function fetchStaffRows(stallId: string): Promise<AdminStaffRow[]> {
-  const { data, error } = await supabase
-    .from("staff")
-    .select("id, full_name, role, active, stall_id")
-    .eq("stall_id", stallId)
-    .order("full_name");
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return (data || []).map((staff) => ({
-    id: String(staff.id),
-    full_name: normalizeNullableString(staff.full_name) || "Staff",
-    role: normalizeStaffRole(staff.role),
-    active: staff.active !== false,
-    stall_id:
-      typeof staff.stall_id === "string" && staff.stall_id.trim()
-        ? staff.stall_id
-        : null,
-  }));
-}
-
-async function fetchLicenseInfo(): Promise<LicenseInfo | null> {
-  const { data, error } = await supabase
-    .from("licenses")
-    .select(
-      "id, business_name, license_type, status, start_date, expiry_date, max_devices, notes, created_at, updated_at"
-    )
-    .order("created_at", { ascending: true })
-    .limit(1);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  const license = data?.[0];
-
-  if (!license) {
-    return null;
-  }
-
-  return {
-    id: String(license.id),
-    business_name: normalizeNullableString(license.business_name) || "",
-    license_type: normalizeNullableString(license.license_type) || "lifetime",
-    status: normalizeNullableString(license.status) || "active",
-    start_date: String(license.start_date),
-    expiry_date:
-      typeof license.expiry_date === "string" && license.expiry_date.trim()
-        ? license.expiry_date
-        : null,
-    max_devices: Number(license.max_devices || 0),
-    notes: normalizeNullableString(license.notes),
-    created_at: String(license.created_at),
-    updated_at: String(license.updated_at),
-  };
-}
-
-async function fetchLastSaleTime(stallId: string) {
-  const { data, error } = await supabase
-    .from("sales")
-    .select("created_at")
-    .eq("stall_id", stallId)
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  const latestSale = data?.[0];
-
-  return typeof latestSale?.created_at === "string"
-    ? latestSale.created_at
-    : null;
-}
-
-async function refreshLicenseBusinessName(businessName: string) {
-  const { data, error } = await supabase
-    .from("licenses")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  const firstLicense = data?.[0];
-
-  if (!firstLicense?.id) {
-    return;
-  }
-
-  const { error: updateError } = await supabase
-    .from("licenses")
-    .update({
-      business_name: businessName.trim(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", firstLicense.id);
-
-  if (updateError) {
-    throw new Error(updateError.message);
-  }
 }
 
 async function fetchBackupRows(
   tableName: (typeof BACKUP_EXPORTS)[number]["table"]
 ) {
-  if (tableName === "staff") {
-    const { data, error } = await supabase
-      .from("staff")
-      .select("id, full_name, role, active, stall_id");
+  const data = await callAdminRpc("export_admin_backup", {
+    p_session_token: getRequiredSessionToken(),
+    p_table_name: tableName,
+  });
 
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    return (data || []) as Array<Record<string, unknown>>;
+  if (!Array.isArray(data)) {
+    throw new Error("Backup export returned an invalid response.");
   }
 
-  const { data, error } = await supabase.from(tableName).select("*");
+  return data as Array<Record<string, unknown>>;
+}
+
+async function callAdminRpc(
+  rpcName: string,
+  params: Record<string, unknown>
+) {
+  const { data, error } = await supabase.rpc(rpcName, params);
 
   if (error) {
+    if (error.message.toLowerCase().includes("could not find the function")) {
+      throw new Error(
+        "Admin RPCs are not installed in Supabase yet. Run supabase/migrations/20260628_admin_rpc_hardening.sql in the Supabase SQL editor, then reload the schema cache."
+      );
+    }
+
     throw new Error(error.message);
   }
 
-  return (data || []) as Array<Record<string, unknown>>;
+  return data;
+}
+
+function getRequiredSessionToken() {
+  const session = getStoredStaffSession();
+
+  if (!session?.session_token) {
+    throw new Error("Staff session has expired. Please sign in again.");
+  }
+
+  return session.session_token;
+}
+
+function normalizeBusinessSetup(record: Record<string, unknown>): AdminBusinessSetup {
+  return {
+    stall_id: readString(record.stall_id),
+    business_name: readString(record.business_name, "Karamela Business"),
+    stall_name: readString(record.stall_name, "Main Stall"),
+    owner_name: readString(record.owner_name),
+    contact_phone: readString(record.contact_phone),
+    receipt_footer: readString(
+      record.receipt_footer,
+      "Thank you for shopping with us."
+    ),
+  };
+}
+
+function normalizeAdminStaffRow(value: unknown): AdminStaffRow {
+  const record = requireRecord(value, "staff row");
+
+  return {
+    id: readString(record.id),
+    full_name: readString(record.full_name, "Staff"),
+    role: normalizeStaffRole(record.role),
+    active: readBoolean(record.active, true),
+    stall_id: normalizeNullableString(record.stall_id),
+  };
+}
+
+function normalizeAdminSessionRow(value: unknown): AdminSessionRow {
+  const record = requireRecord(value, "session row");
+
+  return {
+    id: readString(record.id),
+    staff_id: readString(record.staff_id),
+    staff_name: readString(record.staff_name, "Staff"),
+    role: normalizeStaffRole(record.role),
+    device_label: readString(record.device_label, "Unknown device"),
+    user_agent: readString(record.user_agent, "Unknown user agent"),
+    created_at: readString(record.created_at),
+    last_seen_at: readString(record.last_seen_at),
+    expires_at: readString(record.expires_at),
+    is_current: readBoolean(record.is_current, false),
+  };
+}
+
+function normalizeLicenseInfo(record: Record<string, unknown>): LicenseInfo {
+  return {
+    id: readString(record.id),
+    business_name: readString(record.business_name),
+    license_type: readString(record.license_type, "lifetime"),
+    status: readString(record.status, "active"),
+    start_date: readString(record.start_date),
+    expiry_date: normalizeNullableString(record.expiry_date),
+    max_devices: readNumber(record.max_devices, 1),
+    notes: normalizeNullableString(record.notes),
+    created_at: readString(record.created_at),
+    updated_at: readString(record.updated_at),
+  };
 }
 
 function toBusinessForm(setup: AdminBusinessSetup): BusinessSetupForm {
@@ -1052,6 +1131,55 @@ function toBusinessForm(setup: AdminBusinessSetup): BusinessSetupForm {
     contact_phone: setup.contact_phone,
     receipt_footer: setup.receipt_footer,
   };
+}
+
+function requireRecord(value: unknown, context: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${context} returned an invalid response.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function readArray(value: unknown) {
+  return Array.isArray(value) ? value : [];
+}
+
+function readString(value: unknown, fallback = "") {
+  const normalized = normalizeNullableString(value);
+  return normalized || fallback;
+}
+
+function readNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return fallback;
+}
+
+function readBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (value === "true") {
+    return true;
+  }
+
+  if (value === "false") {
+    return false;
+  }
+
+  return fallback;
 }
 
 function normalizeBusinessForm(form: BusinessSetupForm) {

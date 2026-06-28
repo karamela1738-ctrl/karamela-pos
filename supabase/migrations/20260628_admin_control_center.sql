@@ -1,3 +1,6 @@
+create schema if not exists extensions;
+create extension if not exists pgcrypto with schema extensions;
+
 alter table public.stalls
 add column if not exists business_name text;
 
@@ -41,6 +44,32 @@ alter column active set default true;
 alter table public.staff
 alter column active set not null;
 
+alter table public.staff
+add column if not exists pin_hash text;
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'staff'
+      and column_name = 'pin_code'
+  ) then
+    execute $sql$
+      update public.staff
+      set pin_hash = extensions.crypt(trim(pin_code), extensions.gen_salt('bf'))
+      where pin_hash is null
+        and nullif(trim(pin_code), '') is not null
+        and trim(pin_code) ~ '^[0-9]{6}$'
+    $sql$;
+
+    execute 'alter table public.staff alter column pin_code drop not null';
+    execute 'update public.staff set pin_code = null where pin_code is not null';
+  end if;
+end
+$$;
+
 create table if not exists public.licenses (
   id uuid primary key default gen_random_uuid(),
   business_name text,
@@ -54,8 +83,7 @@ create table if not exists public.licenses (
   updated_at timestamptz not null default now()
 );
 
-revoke insert, delete on table public.licenses from anon, authenticated;
-grant select, update on table public.licenses to anon, authenticated;
+revoke all on table public.licenses from anon, authenticated;
 
 alter table public.licenses
 add column if not exists business_name text;
@@ -177,7 +205,8 @@ begin
   select *
   into v_staff
   from public.staff
-  where pin_code = trim(p_pin_code)
+  where pin_hash is not null
+    and pin_hash = extensions.crypt(trim(p_pin_code), pin_hash)
     and coalesce(active, true) is true;
 
   if not found then

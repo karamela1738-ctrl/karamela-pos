@@ -7,7 +7,7 @@ import {
 } from "@/lib/services/inventory";
 import { logDashboardQuery } from "@/lib/services/dashboard";
 import { getMainStall } from "@/lib/services/stalls";
-import { supabase } from "@/lib/supabase/client";
+import { getRecentWasteLogs } from "@/lib/services/operations";
 import { recordWasteWorkflow } from "@/lib/services/workflows";
 import { triggerDashboardRefresh } from "@/lib/utils/dashboard-refresh";
 import { formatCurrency } from "@/lib/utils/format";
@@ -61,25 +61,16 @@ export default function WastePage() {
         return;
       }
 
-      const { data, error } = await supabase
-        .from("waste_logs")
-        .select("id, product_id, quantity, reason, value_amount, notes, created_at")
-        .eq("stall_id", stall.id)
-        .order("created_at", { ascending: false })
-        .limit(20);
+      const data = await getRecentWasteLogs(stall.id, 20);
 
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      setLogs(data || []);
+      setLogs(data);
       setLogsError(null);
       setLogsLoaded(true);
 
       logDashboardQuery("waste-logs", {
         stall_id: stall.id,
         date_range: "latest 20 rows",
-        row_count: (data || []).length,
+        row_count: data.length,
       });
     } catch (error) {
       console.error("Waste logs error:", error);

@@ -10,19 +10,17 @@ import {
   validateStoredStaffSession,
 } from "@/lib/services/auth";
 import {
+  getReconciliationSalesSummary,
   getBusinessDayStatus,
   type BusinessDayStatus,
 } from "@/lib/services/operations";
 import { logDashboardQuery } from "@/lib/services/dashboard";
-import { supabase } from "@/lib/supabase/client";
-import { getMainStall } from "@/lib/services/stalls";
 import { savePaymentReconciliationWorkflow } from "@/lib/services/workflows";
 import {
   subscribeDashboardRefresh,
   triggerDashboardRefresh,
 } from "@/lib/utils/dashboard-refresh";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { getBusinessDateRangeForDate } from "@/lib/utils/period";
 
 type SalesSummary = {
   cash: number;
@@ -77,45 +75,27 @@ export default function ReconciliationPage() {
   async function loadTodaySales() {
     try {
       await requireActiveReconciliationSession();
-      const currentStatus = await getBusinessDayStatus();
+      const [currentStatus, summary] = await Promise.all([
+        getBusinessDayStatus(),
+        getReconciliationSalesSummary(),
+      ]);
       setStatus(currentStatus);
-      const stall = await getMainStall();
 
-      if (!stall) {
-        return;
-      }
-
-      const today = currentStatus.business_date;
-      const dateRange = getBusinessDateRangeForDate(today);
-
-      const { data, error } = await supabase
-        .from("sales")
-        .select("payment_method, total_amount, created_at")
-        .eq("stall_id", stall.id)
-        .gte("created_at", dateRange.start)
-        .lt("created_at", dateRange.end);
-
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      const summary = { cash: 0, mpesa: 0, card: 0 };
-
-      data?.forEach((sale) => {
-        const method = sale.payment_method as keyof SalesSummary;
-
-        if (method === "cash" || method === "mpesa" || method === "card") {
-          summary[method] += Number(sale.total_amount || 0);
-        }
+      setSales({
+        cash: summary.cash,
+        mpesa: summary.mpesa,
+        card: summary.card,
       });
-
-      setSales(summary);
       setLoadError(null);
 
       logDashboardQuery("reconciliation-sales", {
-        stall_id: stall.id,
-        date_range: dateRange,
-        row_count: (data || []).length,
+        stall_id: summary.stall_id,
+        business_date: summary.business_date,
+        date_range: {
+          start: summary.start_at,
+          end: summary.end_at,
+        },
+        row_count: summary.row_count,
       });
     } catch (error) {
       console.error(error);
@@ -167,15 +147,15 @@ export default function ReconciliationPage() {
 
     try {
       await requireActiveReconciliationSession();
-      const stall = await getMainStall();
+      const stallId = status?.stall_id;
 
-      if (!stall) {
+      if (!stallId) {
         alert("Could not find stall");
         return;
       }
 
       await savePaymentReconciliationWorkflow({
-        stallId: stall.id,
+        stallId,
         businessDate: status?.business_date || "",
         cashCounted: Number(amounts.cash || 0),
         mpesaConfirmed: Number(amounts.mpesa || 0),
